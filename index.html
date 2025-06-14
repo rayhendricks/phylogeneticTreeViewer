@@ -47,16 +47,6 @@
             fill: #475569; /* slate-600 */
             pointer-events: none;
         }
-        /* Search highlight styles */
-        .node--highlight circle {
-            fill: #fbbf24; /* amber-400 */
-            stroke: #f59e0b; /* amber-500 */
-            r: 7px;
-        }
-        .node--highlight text {
-            font-weight: bold;
-            fill: #d97706; /* amber-600 */
-        }
         .node--dimmed {
             opacity: 0.2;
         }
@@ -112,7 +102,7 @@
                 </button>
             </div>
             <div class="flex items-center gap-2 flex-grow min-w-[200px]">
-                <input type="search" id="search-input" placeholder="Search genes..." class="w-full text-sm p-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                <input type="search" id="search-input" placeholder="Search genes (e.g. GENE1, GENE2)..." class="w-full text-sm p-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
                 <button id="clear-search-button" class="text-sm bg-slate-200 hover:bg-slate-300 text-slate-600 font-semibold py-2 px-3 rounded-md transition">&times;</button>
             </div>
              <button id="show-controls-button" class="md:hidden text-sm bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md">Edit Tree</button>
@@ -124,6 +114,13 @@
          <label for="newick-input-mobile" class="block text-sm font-medium text-gray-700 mb-2">Newick String</label>
          <textarea id="newick-input-mobile" rows="6" class="w-full text-sm p-2 border border-gray-300 rounded-md shadow-sm"></textarea>
          <button id="plot-button-mobile" class="w-full mt-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md">Plot Tree</button>
+         <div id="rect-style-toggle-mobile" class="mt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Style</label>
+            <div class="flex rounded-md shadow-sm">
+                <button id="style-phylo-mobile" class="layout-btn rounded-l-md w-1/2 active">Phylogram</button>
+                <button id="style-clado-mobile" class="layout-btn rounded-r-md -ml-px w-1/2">Cladogram</button>
+            </div>
+        </div>
     </div>
 
     <!-- Main Content -->
@@ -137,6 +134,13 @@
             <button id="plot-button-desktop" class="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition">
                 Plot Tree
             </button>
+            <div id="rect-style-toggle-desktop" class="pt-2">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Style</label>
+                <div class="flex rounded-md shadow-sm">
+                    <button id="style-phylo-desktop" class="layout-btn rounded-l-md w-1/2 active">Phylogram</button>
+                    <button id="style-clado-desktop" class="layout-btn rounded-r-md -ml-px w-1/2">Cladogram</button>
+                </div>
+            </div>
             <div id="error-message" class="text-red-500 text-sm mt-2 min-h-[20px]"></div>
         </div>
 
@@ -156,9 +160,10 @@
     <script>
         // --- STATE & DOM ELEMENTS ---
         let currentLayout = 'rectangular';
+        let rectangularStyle = 'phylogram';
         let rootNode; 
         let selectedNodes = [];
-        let initialTransform; // Store the initial zoom transform
+        let initialTransform;
         const rainbowColors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#a65628', '#f781bf', '#999999'];
         const dom = {
             newickDesktop: document.getElementById('newick-input-desktop'),
@@ -176,7 +181,13 @@
             resetViewBtn: document.getElementById('reset-view-btn'),
             distanceDisplay: document.getElementById('distance-display'),
             statsDisplay: document.getElementById('stats-display'),
-            infoInstructions: document.getElementById('info-instructions')
+            infoInstructions: document.getElementById('info-instructions'),
+            rectStyleToggleDesktop: document.getElementById('rect-style-toggle-desktop'),
+            rectStyleToggleMobile: document.getElementById('rect-style-toggle-mobile'),
+            stylePhyloDesktop: document.getElementById('style-phylo-desktop'),
+            styleCladoDesktop: document.getElementById('style-clado-desktop'),
+            stylePhyloMobile: document.getElementById('style-phylo-mobile'),
+            styleCladoMobile: document.getElementById('style-clado-mobile'),
         };
         
         // --- GENE FAMILY SIMULATION ---
@@ -223,7 +234,8 @@
                         if (next === ')' || next === ',' || next === ';') {
                              if (isNaN(parseFloat(token))) tree.name = token; else tree.bootstrap = token;
                         } else if (next === ':') {
-                            tree.name = token; tree.length = parseFloat(tokens[i+2]); i += 2;
+                             if (isNaN(parseFloat(token))) tree.name = token; else tree.bootstrap = token;
+                             tree.length = parseFloat(tokens[i+2]); i += 2;
                         }
                 }
             }
@@ -256,21 +268,15 @@
                 distanceInfo.push({ name: node.data.name || `Node ${node.id}`, distance: totalDistance, color: color });
             });
 
-            // Find and highlight MRCA
             if (allAncestorSets.length >= 2) {
                 const intersection = allAncestorSets.reduce((a, b) => new Set([...a].filter(x => b.has(x))));
                 let mrca = null;
                 let maxDepth = -1;
                 intersection.forEach(id => {
                     const node = rootNode.descendants().find(n => n.id === id);
-                    if (node && node.depth > maxDepth) {
-                        maxDepth = node.depth;
-                        mrca = node;
-                    }
+                    if (node && node.depth > maxDepth) { maxDepth = node.depth; mrca = node; }
                 });
-                if (mrca) {
-                    svg.selectAll('.node').filter(d => d.id === mrca.id).classed('node--mrca', true);
-                }
+                if (mrca) { svg.selectAll('.node').filter(d => d.id === mrca.id).classed('node--mrca', true); }
             }
 
             if (distanceInfo.length > 0) {
@@ -303,22 +309,21 @@
                 const height = dom.visContainer.clientHeight;
                 
                 const svg = d3.select(dom.visContainer).append("svg").attr("width", width).attr("height", height)
-                    .on('click', () => { selectedNodes = []; updateAllHighlights(svg); });
+                    .on('click', () => { selectedNodes = []; updateAllHighlights(svg); dom.search.dispatchEvent(new Event('input')) });
                 const g = svg.append("g");
                 
                 rootNode = d3.hierarchy(data, d => d.children);
                 rootNode.each((d, i) => d.id = i);
-                rootNode.sum(d => d.length);
-
-                // --- Tree Stats Calculation ---
+                
+                // Only sum branch lengths for phylogram style
+                if (currentLayout === 'rectangular' && rectangularStyle === 'phylogram') {
+                     rootNode.sum(d => d.length); 
+                }
+                
                 const internalNodes = rootNode.descendants().filter(d => d.children);
                 const bootstrapSum = d3.sum(internalNodes, d => d.data.bootstrap ? parseFloat(d.data.bootstrap) : 0);
                 const avgBootstrap = internalNodes.length > 0 ? (bootstrapSum / internalNodes.length).toFixed(2) : 'N/A';
-                dom.statsDisplay.innerHTML = `
-                    <span class="mr-2"><strong>Nodes:</strong> ${rootNode.descendants().length}</span>
-                    <span class="mr-2"><strong>Leaves:</strong> ${rootNode.leaves().length}</span>
-                    <span><strong>Avg. Support:</strong> ${avgBootstrap}</span>
-                `;
+                dom.statsDisplay.innerHTML = `<span class="mr-2"><strong>Nodes:</strong> ${rootNode.descendants().length}</span><span class="mr-2"><strong>Leaves:</strong> ${rootNode.leaves().length}</span><span><strong>Avg. Support:</strong> ${avgBootstrap}</span>`;
 
                 if (currentLayout === 'circular') {
                     svg.attr("viewBox", [-width / 2, -height / 2, width, height]);
@@ -329,8 +334,17 @@
                     d3.tree().size([requiredHeight - 40, width - 200])(rootNode);
                 }
                 
+                let linkGenerator;
+                if (currentLayout === 'rectangular' && rectangularStyle === 'cladogram') {
+                     linkGenerator = d => `M${d.source.y},${d.source.x}L${d.target.y},${d.source.x}L${d.target.y},${d.target.x}`;
+                } else if (currentLayout === 'circular') {
+                     linkGenerator = d3.linkRadial().angle(d => d.x).radius(d => d.y);
+                } else { // Rectangular phylogram
+                     linkGenerator = d3.linkHorizontal().x(d => d.y).y(d => d.x);
+                }
+
                 g.selectAll('.link').data(rootNode.links()).enter().append('path').attr('class', 'link')
-                    .attr('d', currentLayout === 'circular' ? d3.linkRadial().angle(d => d.x).radius(d => d.y) : d3.linkHorizontal().x(d => d.y).y(d => d.x));
+                    .attr('d', linkGenerator);
 
                 const node = g.selectAll('.node').data(rootNode.descendants()).enter().append('g')
                     .attr('class', d => `node ${d.children ? 'node--internal' : 'node--leaf'}`)
@@ -379,19 +393,36 @@
         
         function handleSearch() {
             const query = dom.search.value.toLowerCase().trim();
+            const searchTerms = query.split(',').map(term => term.trim()).filter(term => term.length > 0);
+
             const svg = d3.select(dom.visContainer).select('svg');
-            selectedNodes = []; updateAllHighlights(svg);
-            if (!rootNode) return;
+            if (!rootNode || !svg.node()) return;
+            
             const allNodes = svg.selectAll('.node');
-            if (!query) {
-                allNodes.classed('node--highlight', false).classed('node--dimmed', false); return;
+            
+            if (searchTerms.length === 0) {
+                selectedNodes = [];
+                allNodes.classed('node--dimmed', false);
+                updateAllHighlights(svg);
+                return;
             }
-            const matchingNodeIds = new Set();
-            rootNode.leaves().forEach(d => {
-                if (d.data.name && d.data.name.toLowerCase().includes(query)) matchingNodeIds.add(d.id);
+
+            selectedNodes = rootNode.leaves().filter(d => {
+                if (!d.data.name) return false;
+                const nodeName = d.data.name.toLowerCase();
+                return searchTerms.some(term => nodeName === term); // Exact match
             });
-            allNodes.classed('node--dimmed', true).classed('node--highlight', false);
-            allNodes.filter(d => matchingNodeIds.has(d.id)).classed('node--dimmed', false).classed('node--highlight', true);
+
+            const highlightedAncestorIds = new Set();
+            selectedNodes.forEach(node => {
+                node.ancestors().forEach(ancestor => highlightedAncestorIds.add(ancestor.id));
+            });
+
+            allNodes.classed('node--dimmed', true);
+            allNodes.filter(d => highlightedAncestorIds.has(d.id))
+                    .classed('node--dimmed', false);
+            
+            updateAllHighlights(svg);
         }
         
         // --- EVENT LISTENERS ---
@@ -404,8 +435,35 @@
                 (e.target.id === 'newick-input-desktop' ? dom.newickMobile : dom.newickDesktop).value = e.target.value;
             });
         });
-        dom.layoutRect.addEventListener('click', () => { currentLayout = 'rectangular'; dom.layoutRect.classList.add('active'); dom.layoutCirc.classList.remove('active'); plotTree(); });
-        dom.layoutCirc.addEventListener('click', () => { currentLayout = 'circular'; dom.layoutCirc.classList.add('active'); dom.layoutRect.classList.remove('active'); plotTree(); });
+        dom.layoutRect.addEventListener('click', () => { 
+            currentLayout = 'rectangular'; 
+            dom.layoutRect.classList.add('active'); 
+            dom.layoutCirc.classList.remove('active');
+            dom.rectStyleToggleDesktop.style.display = 'block';
+            dom.rectStyleToggleMobile.style.display = 'block';
+            plotTree(); 
+        });
+        dom.layoutCirc.addEventListener('click', () => { 
+            currentLayout = 'circular'; 
+            dom.layoutCirc.classList.add('active'); 
+            dom.layoutRect.classList.remove('active'); 
+            dom.rectStyleToggleDesktop.style.display = 'none';
+            dom.rectStyleToggleMobile.style.display = 'none';
+            plotTree(); 
+        });
+        [dom.stylePhyloDesktop, dom.stylePhyloMobile].forEach(btn => btn.addEventListener('click', () => {
+            rectangularStyle = 'phylogram';
+            [dom.stylePhyloDesktop, dom.stylePhyloMobile].forEach(b => b.classList.add('active'));
+            [dom.styleCladoDesktop, dom.styleCladoMobile].forEach(b => b.classList.remove('active'));
+            plotTree();
+        }));
+        [dom.styleCladoDesktop, dom.styleCladoMobile].forEach(btn => btn.addEventListener('click', () => {
+            rectangularStyle = 'cladogram';
+            [dom.styleCladoDesktop, dom.styleCladoMobile].forEach(b => b.classList.add('active'));
+            [dom.stylePhyloDesktop, dom.stylePhyloMobile].forEach(b => b.classList.remove('active'));
+            plotTree();
+        }));
+
         new ResizeObserver(() => plotTree()).observe(dom.visContainer);
         window.onload = () => {
              dom.newickDesktop.value = generateGeneFamilyNewick(100);
