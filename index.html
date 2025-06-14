@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Phylogenetic Tree Viewer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none;
+        }
+        #vis-container {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+        #vis-container:active {
+            cursor: grabbing;
+        }
+        .link {
+            fill: none;
+            stroke: #e2e8f0; /* slate-200 */
+            stroke-width: 1.5px;
+            transition: stroke 0.3s, stroke-width 0.3s;
+        }
+        .node {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .node circle {
+            stroke-width: 2.5px;
+            transition: all 0.3s ease;
+        }
+        .node--internal circle {
+            fill: #64748b; /* slate-500 */
+            stroke: #475569; /* slate-600 */
+        }
+        .node--leaf circle {
+            fill: #2dd4bf; /* teal-400 */
+            stroke: #14b8a6; /* teal-500 */
+        }
+        .node text {
+            font: 10px sans-serif;
+            fill: #475569; /* slate-600 */
+            pointer-events: none;
+        }
+        /* Search highlight styles */
+        .node--highlight circle {
+            fill: #fbbf24; /* amber-400 */
+            stroke: #f59e0b; /* amber-500 */
+            r: 7px;
+        }
+        .node--highlight text {
+            font-weight: bold;
+            fill: #d97706; /* amber-600 */
+        }
+        .node--dimmed {
+            opacity: 0.2;
+        }
+        /* Path highlight styles */
+        .link--path-highlight {
+            stroke-width: 3.5px !important;
+        }
+        .node--path-highlight circle {
+            r: 6px !important;
+        }
+        .node--mrca circle {
+            fill: #c084fc; /* purple-400 */
+            stroke: #9333ea; /* purple-600 */
+            r: 8px !important;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(147, 51, 234, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(147, 51, 234, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(147, 51, 234, 0); }
+        }
+        .layout-btn {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+        .layout-btn.active {
+            background-color: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 flex flex-col h-screen overflow-hidden">
+
+    <!-- Toolbar -->
+    <header class="bg-white/80 backdrop-blur-md shadow-sm p-2 z-10 border-b border-slate-200">
+        <div class="container mx-auto flex flex-wrap items-center justify-between gap-4">
+            <h1 class="text-lg font-bold text-slate-700 whitespace-nowrap">Phylogenetic Tree Viewer</h1>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-slate-600">Layout:</span>
+                    <div class="flex rounded-md shadow-sm">
+                        <button id="layout-rect" class="layout-btn rounded-l-md active">Rectangular</button>
+                        <button id="layout-circ" class="layout-btn rounded-r-md -ml-px">Circular</button>
+                    </div>
+                </div>
+                <button id="reset-view-btn" class="layout-btn rounded-md flex items-center gap-1.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"/><path d="M21 12A9 9 0 0 0 6 5.3L3 8"/><path d="M21 22v-6h-6"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/></svg>
+                    Reset View
+                </button>
+            </div>
+            <div class="flex items-center gap-2 flex-grow min-w-[200px]">
+                <input type="search" id="search-input" placeholder="Search genes..." class="w-full text-sm p-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                <button id="clear-search-button" class="text-sm bg-slate-200 hover:bg-slate-300 text-slate-600 font-semibold py-2 px-3 rounded-md transition">&times;</button>
+            </div>
+             <button id="show-controls-button" class="md:hidden text-sm bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md">Edit Tree</button>
+        </div>
+    </header>
+    
+    <!-- Controls Panel (Collapsible for Mobile) -->
+    <div id="controls-panel" class="hidden md:hidden bg-white p-4 border-b">
+         <label for="newick-input-mobile" class="block text-sm font-medium text-gray-700 mb-2">Newick String</label>
+         <textarea id="newick-input-mobile" rows="6" class="w-full text-sm p-2 border border-gray-300 rounded-md shadow-sm"></textarea>
+         <button id="plot-button-mobile" class="w-full mt-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md">Plot Tree</button>
+    </div>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex flex-row container mx-auto p-4 gap-4 overflow-hidden">
+        <!-- Desktop Controls -->
+        <div class="hidden md:flex w-1/3 lg:w-1/4 bg-white p-4 rounded-lg shadow-sm border flex-col space-y-4">
+            <div>
+                <label for="newick-input-desktop" class="block text-sm font-medium text-gray-700 mb-2">Newick String</label>
+                <textarea id="newick-input-desktop" rows="10" class="w-full p-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 transition"></textarea>
+            </div>
+            <button id="plot-button-desktop" class="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition">
+                Plot Tree
+            </button>
+            <div id="error-message" class="text-red-500 text-sm mt-2 min-h-[20px]"></div>
+        </div>
+
+        <!-- Visualization -->
+        <div class="flex-grow bg-white rounded-lg shadow-sm border overflow-hidden relative">
+            <div id="vis-container"></div>
+            <!-- Info Boxes -->
+            <div id="info-panel" class="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-slate-600 bg-white/80 p-2 rounded-md border border-slate-200 shadow-sm pointer-events-none w-auto max-w-sm">
+                 <p class="text-center font-semibold mb-1">Analysis & Info</p>
+                 <div id="stats-display" class="text-center text-slate-500 text-[11px] mb-2"></div>
+                 <p id="info-instructions" class="text-center text-slate-500 text-[11px]">Click nodes to compare paths. Click background to clear.</p>
+                 <div id="distance-display" class="mt-1"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- STATE & DOM ELEMENTS ---
+        let currentLayout = 'rectangular';
+        let rootNode; 
+        let selectedNodes = [];
+        let initialTransform; // Store the initial zoom transform
+        const rainbowColors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#a65628', '#f781bf', '#999999'];
+        const dom = {
+            newickDesktop: document.getElementById('newick-input-desktop'),
+            newickMobile: document.getElementById('newick-input-mobile'),
+            plotDesktop: document.getElementById('plot-button-desktop'),
+            plotMobile: document.getElementById('plot-button-mobile'),
+            search: document.getElementById('search-input'),
+            clearSearch: document.getElementById('clear-search-button'),
+            visContainer: document.getElementById('vis-container'),
+            errorMsg: document.getElementById('error-message'),
+            controlsBtn: document.getElementById('show-controls-button'),
+            controlsPanel: document.getElementById('controls-panel'),
+            layoutRect: document.getElementById('layout-rect'),
+            layoutCirc: document.getElementById('layout-circ'),
+            resetViewBtn: document.getElementById('reset-view-btn'),
+            distanceDisplay: document.getElementById('distance-display'),
+            statsDisplay: document.getElementById('stats-display'),
+            infoInstructions: document.getElementById('info-instructions')
+        };
+        
+        // --- GENE FAMILY SIMULATION ---
+        function generateGeneFamilyNewick(count) {
+            let leaves = Array.from({ length: count }, (_, i) => `HSP90AA${i + 1}:${(Math.random() * 0.05).toFixed(4)}`);
+            function buildTree(nodes) {
+                if (nodes.length <= 1) return nodes[0];
+                for (let i = nodes.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [nodes[i], nodes[j]] = [nodes[j], nodes[i]];
+                }
+                const newNodes = [];
+                for (let i = 0; i < nodes.length; i += 2) {
+                    if (i + 1 < nodes.length) {
+                        const bootstrap = (0.6 + Math.random() * 0.4).toFixed(2);
+                        const branchLength = (Math.random() * 0.2 + 0.01).toFixed(4);
+                        newNodes.push(`(${nodes[i]},${nodes[i+1]})${bootstrap}:${branchLength}`);
+                    } else {
+                        newNodes.push(nodes[i]);
+                    }
+                }
+                return buildTree(newNodes);
+            }
+            return buildTree(leaves) + ";";
+        }
+
+        // --- NEWICK PARSER ---
+        function parseNewick(s) {
+            const ancestors = []; let tree = {};
+            const tokens = s.split(/\s*(;|\(|\)|,|:)\s*/).filter(t => t && t.length);
+            for (let i=0; i < tokens.length; i++) {
+                const token = tokens[i];
+                switch (token) {
+                    case '(':
+                        const subtree = {}; tree.children = tree.children || []; tree.children.push(subtree);
+                        ancestors.push(tree); tree = subtree; break;
+                    case ',':
+                        const parent = ancestors[ancestors.length-1]; const sibling = {};
+                        parent.children.push(sibling); tree = sibling; break;
+                    case ')': tree = ancestors.pop(); break;
+                    case ':': break;
+                    default:
+                        const next = tokens[i+1];
+                        if (next === ')' || next === ',' || next === ';') {
+                             if (isNaN(parseFloat(token))) tree.name = token; else tree.bootstrap = token;
+                        } else if (next === ':') {
+                            tree.name = token; tree.length = parseFloat(tokens[i+2]); i += 2;
+                        }
+                }
+            }
+            return tree;
+        }
+
+        // --- D3 RENDERING LOGIC ---
+        function updateAllHighlights(svg) {
+            if (!svg) return;
+            svg.selectAll('.link').style('stroke', null).classed('link--path-highlight', false);
+            svg.selectAll('.node').classed('node--path-highlight', false).classed('node--mrca', false)
+                .select('circle').style('stroke', null).style('fill', null);
+            
+            let distanceInfo = [];
+            let allAncestorSets = [];
+
+            selectedNodes.forEach((node, i) => {
+                const color = rainbowColors[i % rainbowColors.length];
+                const ancestors = node.ancestors();
+                const ancestorIds = new Set(ancestors.map(n => n.id));
+                allAncestorSets.push(ancestorIds);
+                
+                svg.selectAll('.node').filter(d => ancestorIds.has(d.id)).classed('node--path-highlight', true)
+                   .select('circle').style('stroke', color).style('fill', d3.color(color).brighter(1.2));
+                svg.selectAll('.link').filter(d => ancestorIds.has(d.source.id) && ancestorIds.has(d.target.id))
+                   .classed('link--path-highlight', true).style('stroke', color);
+
+                let totalDistance = 0;
+                ancestors.forEach(n => { if (n.parent) totalDistance += n.data.length || 0; });
+                distanceInfo.push({ name: node.data.name || `Node ${node.id}`, distance: totalDistance, color: color });
+            });
+
+            // Find and highlight MRCA
+            if (allAncestorSets.length >= 2) {
+                const intersection = allAncestorSets.reduce((a, b) => new Set([...a].filter(x => b.has(x))));
+                let mrca = null;
+                let maxDepth = -1;
+                intersection.forEach(id => {
+                    const node = rootNode.descendants().find(n => n.id === id);
+                    if (node && node.depth > maxDepth) {
+                        maxDepth = node.depth;
+                        mrca = node;
+                    }
+                });
+                if (mrca) {
+                    svg.selectAll('.node').filter(d => d.id === mrca.id).classed('node--mrca', true);
+                }
+            }
+
+            if (distanceInfo.length > 0) {
+                dom.distanceDisplay.innerHTML = `<ul>${distanceInfo.map(d => 
+                    `<li class="flex items-center mt-1"><span class="w-3 h-3 rounded-full mr-2 flex-shrink-0" style="background-color: ${d.color};"></span><span class="font-semibold">${d.name}:</span><span class="ml-1 text-slate-500">${d.distance.toFixed(4)}</span></li>`
+                ).join('')}</ul><p class="text-right text-slate-400 text-[10px] mt-1 italic">Distance in substitutions/site</p>`;
+                dom.infoInstructions.style.display = 'none';
+            } else {
+                 dom.distanceDisplay.innerHTML = '';
+                 dom.infoInstructions.style.display = 'block';
+            }
+        }
+
+        function plotTree() {
+            dom.errorMsg.textContent = '';
+            dom.visContainer.innerHTML = ''; 
+            selectedNodes = [];
+
+            let data;
+            try {
+                const newickString = dom.newickDesktop.value;
+                if (!newickString) throw new Error('Input cannot be empty.');
+                data = parseNewick(newickString);
+            } catch (error) {
+                dom.errorMsg.textContent = `Parse Error: ${error.message}`; return;
+            }
+
+            requestAnimationFrame(() => {
+                const width = dom.visContainer.clientWidth;
+                const height = dom.visContainer.clientHeight;
+                
+                const svg = d3.select(dom.visContainer).append("svg").attr("width", width).attr("height", height)
+                    .on('click', () => { selectedNodes = []; updateAllHighlights(svg); });
+                const g = svg.append("g");
+                
+                rootNode = d3.hierarchy(data, d => d.children);
+                rootNode.each((d, i) => d.id = i);
+                rootNode.sum(d => d.length);
+
+                // --- Tree Stats Calculation ---
+                const internalNodes = rootNode.descendants().filter(d => d.children);
+                const bootstrapSum = d3.sum(internalNodes, d => d.data.bootstrap ? parseFloat(d.data.bootstrap) : 0);
+                const avgBootstrap = internalNodes.length > 0 ? (bootstrapSum / internalNodes.length).toFixed(2) : 'N/A';
+                dom.statsDisplay.innerHTML = `
+                    <span class="mr-2"><strong>Nodes:</strong> ${rootNode.descendants().length}</span>
+                    <span class="mr-2"><strong>Leaves:</strong> ${rootNode.leaves().length}</span>
+                    <span><strong>Avg. Support:</strong> ${avgBootstrap}</span>
+                `;
+
+                if (currentLayout === 'circular') {
+                    svg.attr("viewBox", [-width / 2, -height / 2, width, height]);
+                    d3.cluster().size([2 * Math.PI, Math.min(width, height) / 2 * 0.85])(rootNode);
+                } else {
+                    svg.attr("viewBox", [0, 0, width, height]);
+                    const requiredHeight = Math.max(height, rootNode.leaves().length * 15);
+                    d3.tree().size([requiredHeight - 40, width - 200])(rootNode);
+                }
+                
+                g.selectAll('.link').data(rootNode.links()).enter().append('path').attr('class', 'link')
+                    .attr('d', currentLayout === 'circular' ? d3.linkRadial().angle(d => d.x).radius(d => d.y) : d3.linkHorizontal().x(d => d.y).y(d => d.x));
+
+                const node = g.selectAll('.node').data(rootNode.descendants()).enter().append('g')
+                    .attr('class', d => `node ${d.children ? 'node--internal' : 'node--leaf'}`)
+                    .attr('transform', d => currentLayout === 'circular' ? `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y},0)` : `translate(${d.y},${d.x})`)
+                    .on('click', function(event, d) {
+                        event.stopPropagation();
+                        const index = selectedNodes.findIndex(n => n.id === d.id);
+                        if (index > -1) selectedNodes.splice(index, 1); else selectedNodes.push(d);
+                        updateAllHighlights(svg);
+                    });
+
+                node.append('circle').attr('r', 4.5);
+                node.append('text').attr('dy', '0.31em')
+                    .attr('x', d => currentLayout === 'circular' ? (d.x < Math.PI === !d.children ? 8 : -8) : (d.children ? -8 : 8))
+                    .attr('text-anchor', d => currentLayout === 'circular' ? (d.x < Math.PI === !d.children ? 'start' : 'end') : (d.children ? 'end' : 'start'))
+                    .attr('transform', d => currentLayout === 'circular' ? (d.x >= Math.PI ? 'rotate(180)' : null) : null)
+                    .text(d => d.data.name || (d.children ? d.data.bootstrap : '') || '')
+                    .clone(true).lower().attr("stroke", "white").attr("stroke-width", 3);
+                
+                const zoom = d3.zoom().scaleExtent([0.1, 7]).on('zoom', (event) => {
+                    g.attr('transform', event.transform); updateAllHighlights(svg); });
+                svg.call(zoom);
+
+                if (currentLayout === 'rectangular') {
+                    const bounds = g.node().getBBox();
+                    if (bounds.width > 0 && bounds.height > 0) {
+                        const scale = Math.min(0.95, (width - 40) / bounds.width, (height - 40) / bounds.height);
+                        const translateX = 20 + (width - bounds.width * scale - 40) / 2 - bounds.x * scale;
+                        const translateY = (height - bounds.height * scale) / 2 - bounds.y * scale;
+                        initialTransform = d3.zoomIdentity.translate(translateX, translateY).scale(scale);
+                        svg.call(zoom.transform, initialTransform);
+                    }
+                } else {
+                    initialTransform = d3.zoomIdentity;
+                    svg.call(zoom.transform, initialTransform);
+                }
+                
+                dom.resetViewBtn.onclick = () => {
+                    svg.transition().duration(750).call(zoom.transform, initialTransform);
+                };
+
+                updateAllHighlights(svg);
+                dom.search.dispatchEvent(new Event('input'));
+            });
+        }
+        
+        function handleSearch() {
+            const query = dom.search.value.toLowerCase().trim();
+            const svg = d3.select(dom.visContainer).select('svg');
+            selectedNodes = []; updateAllHighlights(svg);
+            if (!rootNode) return;
+            const allNodes = svg.selectAll('.node');
+            if (!query) {
+                allNodes.classed('node--highlight', false).classed('node--dimmed', false); return;
+            }
+            const matchingNodeIds = new Set();
+            rootNode.leaves().forEach(d => {
+                if (d.data.name && d.data.name.toLowerCase().includes(query)) matchingNodeIds.add(d.id);
+            });
+            allNodes.classed('node--dimmed', true).classed('node--highlight', false);
+            allNodes.filter(d => matchingNodeIds.has(d.id)).classed('node--dimmed', false).classed('node--highlight', true);
+        }
+        
+        // --- EVENT LISTENERS ---
+        [dom.plotDesktop, dom.plotMobile].forEach(btn => btn.addEventListener('click', plotTree));
+        dom.controlsBtn.addEventListener('click', () => dom.controlsPanel.classList.toggle('hidden'));
+        dom.search.addEventListener('input', handleSearch);
+        dom.clearSearch.addEventListener('click', () => { dom.search.value = ''; handleSearch(); });
+        [dom.newickDesktop, dom.newickMobile].forEach(input => {
+            input.addEventListener('input', (e) => {
+                (e.target.id === 'newick-input-desktop' ? dom.newickMobile : dom.newickDesktop).value = e.target.value;
+            });
+        });
+        dom.layoutRect.addEventListener('click', () => { currentLayout = 'rectangular'; dom.layoutRect.classList.add('active'); dom.layoutCirc.classList.remove('active'); plotTree(); });
+        dom.layoutCirc.addEventListener('click', () => { currentLayout = 'circular'; dom.layoutCirc.classList.add('active'); dom.layoutRect.classList.remove('active'); plotTree(); });
+        new ResizeObserver(() => plotTree()).observe(dom.visContainer);
+        window.onload = () => {
+             dom.newickDesktop.value = generateGeneFamilyNewick(100);
+             dom.newickMobile.value = dom.newickDesktop.value;
+             setTimeout(plotTree, 100);
+        }
+    </script>
+</body>
+</html>
