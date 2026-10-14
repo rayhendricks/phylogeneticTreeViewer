@@ -1,6 +1,6 @@
-# Phylogenetic Tree Viewer
+# LocalTree
 
-Interactive tree viewer and annotator modelled on [iTOL](https://itol.embl.de/), running entirely in the browser.
+LocalTree is an interactive phylogenetic tree viewer and annotator modelled on [iTOL](https://itol.embl.de/), running entirely in the browser.
 No server, no account, no uploads: open `index.html` directly or host the folder on any static server (e.g. GitHub Pages).
 
 ## Features

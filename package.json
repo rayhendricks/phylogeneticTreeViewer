@@ -1,5 +1,5 @@
 {
-  "name": "phylogenetic-tree-viewer",
+  "name": "localtree",
   "version": "2.0.0",
   "private": true,
   "description": "Interactive phylogenetic tree viewer and annotator that runs entirely in the browser.",
