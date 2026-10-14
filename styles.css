@@ -276,3 +276,14 @@ details.sub .input { margin: 4px 0; }
 .ed-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; }
 .ed-actions input[type="color"] { width: 26px; height: 26px; }
 .ramp-preview { height: 12px; border-radius: 3px; border: 1px solid var(--border); }
+
+/* Dashboard families list */
+.families .fam-wrap { max-height: 38vh; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.tbl.fam { font-size: 12px; }
+.tbl.fam th { cursor: pointer; user-select: none; white-space: nowrap; }
+.tbl.fam th.sorted { color: var(--accent); }
+.tbl.fam td { padding: 4px 8px; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.tbl.fam tbody tr { cursor: pointer; }
+.tbl.fam tbody tr:hover { background: var(--hover); }
+.tbl.fam tbody tr.current { background: var(--accent-weak); font-weight: 600; }
+.families .field.row .input { flex: 1; min-height: 28px; }

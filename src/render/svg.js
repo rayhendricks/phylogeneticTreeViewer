@@ -1,5 +1,5 @@
 /* Scene -> standalone SVG document (for vector export). */
-import { alignmentBitmap } from './canvas.js';
+import { alignmentBitmap, schemeFor } from './canvas.js';
 
 export const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = v => Math.round(v * 100) / 100;
@@ -10,6 +10,28 @@ function bitmapDataUrl(bmp) {
   c.width = bmp.width; c.height = bmp.height;
   c.getContext('2d').drawImage(bmp, 0, 0);
   return c.toDataURL('image/png');
+}
+
+// Without a canvas (command line), draw alignments as runs of same-colored residues.
+function alignmentVector(p) {
+  const scheme = schemeFor(p);
+  const cw = p.w / p.len, ch = p.h / p.rows.length;
+  const byColor = new Map();
+  p.rows.forEach((s, r) => {
+    if (!s) return;
+    let i = 0;
+    while (i < s.length) {
+      const col = scheme[s[i]];
+      let j = i + 1;
+      while (j < s.length && scheme[s[j]] === col) j++;
+      if (col) {
+        if (!byColor.has(col)) byColor.set(col, []);
+        byColor.get(col).push(`M${n2(p.x + i * cw)},${n2(p.y + r * ch)}h${n2((j - i) * cw)}v${n2(ch)}h${n2(-(j - i) * cw)}Z`);
+      }
+      i = j;
+    }
+  });
+  return [...byColor].map(([c, d]) => `<path d="${d.join('')}" fill="${c}"/>`).join('');
 }
 
 export function sceneToSVG(prims, { bounds, bg = '#ffffff', font, pad = 16 }) {
@@ -43,8 +65,12 @@ export function sceneToSVG(prims, { bounds, bg = '#ffffff', font, pad = 16 }) {
         break;
       }
       case 'a': {
-        const url = bitmapDataUrl(alignmentBitmap(p));
-        if (url) out.push(`<image href="${url}" x="${n2(p.x)}" y="${n2(p.y)}" width="${n2(p.w)}" height="${n2(p.h)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`);
+        if (typeof document !== 'undefined') {
+          const url = bitmapDataUrl(alignmentBitmap(p));
+          out.push(`<image href="${url}" x="${n2(p.x)}" y="${n2(p.y)}" width="${n2(p.w)}" height="${n2(p.h)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`);
+        } else {
+          out.push(alignmentVector(p));
+        }
         break;
       }
       case 'g': {

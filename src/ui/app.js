@@ -10,21 +10,16 @@ import { paint } from '../render/canvas.js';
 import { sceneToSVG, esc } from '../render/svg.js';
 import { PALETTES } from '../render/color.js';
 import { View } from './view.js';
+import { DEFAULTS, autoSettings } from '../core/settings.js';
+import { detectKind } from '../io/detect.js';
 import { initPanels } from './panels.js';
+import { initDashboard } from './dashboard.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const STORAGE_KEY = 'ptv-session-v2';
 const THEME_KEY = 'ptv-theme';
 
-export const DEFAULTS = {
-  mode: 'rectangular', branchLengths: true, alignLabels: false, showLeafLabels: true, showInternalLabels: false,
-  support: 'none', supportMin: 0, showBranchLengths: false, fontSize: 12, spacing: 18, treeWidth: 500,
-  arc: 360, rotation: 0, innerRadius: 0, lineWidth: 1.5, nodeDots: false, italic: false, showLegend: true,
-  showScale: true, dimNonHits: true, rangeOpacity: 0.35, datasetGap: 6,
-  fontFamily: 'Helvetica, Arial, sans-serif', bgColor: null, branchColor: null, labelColor: null,
-  branchColorBy: 'none', branchRamp: 'Viridis', branchRampReverse: false, palette: 'Tableau 10',
-};
 
 export const state = {
   tree: null, name: '', fileTrees: null, settings: { ...DEFAULTS }, datasets: [], selection: [],
@@ -210,17 +205,6 @@ export const fit = (animate = true) => state.scene && view.fit(state.scene.bound
 // ---------- tree state & undo ----------
 function reindex() { state.index = Tree.buildIndex(state.tree.root); }
 
-function autoSettings(root) {
-  const n = Tree.leaves(root).length;
-  const s = state.settings;
-  s.spacing = n > 3000 ? 3 : n > 1000 ? 5 : n > 300 ? 9 : n > 100 ? 14 : 20;
-  s.fontSize = Math.max(3, Math.min(13, Math.round(s.spacing * 0.7 * 2) / 2));
-  s.treeWidth = Math.round(Math.min(2400, Math.max(450, n * 2)) / 10) * 10;
-  s.branchLengths = Tree.hasBranchLengths(root);
-  s.support = 'none';
-  s.branchColorBy = 'none';
-  for (const nd of Tree.preorder(root)) if (nd.children.length && nd.support != null) { s.support = n <= 200 ? 'text' : 'symbol'; break; }
-}
 
 export function setTree(root, name, opts = {}) {
   state.tree = { root };
@@ -229,7 +213,7 @@ export function setTree(root, name, opts = {}) {
   state.selection = [];
   if (!opts.keepDatasets) state.datasets = [];
   if ('fileTrees' in opts) state.fileTrees = opts.fileTrees;
-  if (opts.auto !== false) autoSettings(root);
+  if (opts.auto !== false) autoSettings(state.settings, root);
   reindex();
   updateTreeSwitch();
   refreshSearch(false);
@@ -302,7 +286,7 @@ let saveTimer = null;
 function scheduleSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    if (!state.tree) return;
+    if (!state.tree || state.embedded) return;
     try {
       const json = JSON.stringify(sessionObject());
       if (json.length > 4.5e6) throw new Error('too large');
@@ -326,28 +310,26 @@ function migrateDataset(d) {
   return d;
 }
 
-function loadSession(o) {
+// keepView: keep the current display choices (layout, colors, labels) but take size-dependent ones from the session.
+const SIZE_KEYS = ['spacing', 'fontSize', 'treeWidth', 'branchLengths', 'support'];
+export function loadSession(o, keepView = false) {
   if (!o || !Array.isArray(o.tree) || !o.tree.length) throw new Error('Invalid session file');
   const root = Tree.restore(o.tree);
-  state.settings = { ...DEFAULTS, ...(o.settings || {}) };
+  const incoming = { ...DEFAULTS, ...(o.settings || {}) };
+  if (keepView && state.tree) {
+    const kept = { ...state.settings };
+    for (const k of SIZE_KEYS) kept[k] = incoming[k];
+    // Category coloring refers to a dataset id; keep it only if this session has that dataset.
+    if (kept.branchColorBy.startsWith('cat:') && !(o.datasets || []).some(d => 'cat:' + d.id === kept.branchColorBy)) kept.branchColorBy = incoming.branchColorBy;
+    state.settings = kept;
+  } else {
+    state.settings = incoming;
+  }
   state.datasets = Array.isArray(o.datasets) ? o.datasets.map(migrateDataset) : [];
   setTree(root, o.name, { keepDatasets: true, auto: false, fileTrees: null });
 }
 
 // ---------- loading ----------
-function detectKind(text, filename = '') {
-  const t = text.replace(/^﻿/, '').trimStart();
-  if (t[0] === '{') {
-    try { if (JSON.parse(t).ptvSession) return 'session'; } catch (e) { /* not JSON */ }
-  }
-  if (Ann.isItol(t)) return 'annotation';
-  if (Ann.isFasta(t) || /\.(fa|fasta|fas|aln|afa|faa|fna)$/i.test(filename)) return 'fasta';
-  if (/^#nexus/i.test(t) || t[0] === '<' || t[0] === '(' || t[0] === '[') return 'tree';
-  if (/\.(csv|tsv|tab)$/i.test(filename)) return 'table';
-  const lines = t.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length >= 2 && !t.includes('(') && /[\t,;]/.test(lines[0])) return 'table';
-  return 'tree';
-}
 
 export async function ingest(text, kind, name) {
   if (kind === 'session') { loadSession(JSON.parse(text)); toast(`Session "${state.name}" loaded`); return; }
@@ -1026,6 +1008,13 @@ export async function init() {
   });
   bind();
   panels.sync();
+  const embed = window.LOCALTREE_EMBED;
+  if (embed && (embed.session || embed.dashboard)) {
+    state.embedded = true;
+    if (embed.session) loadSession(embed.session);
+    else initDashboard(embed.dashboard, { loadSession, toast, state });
+    return;
+  }
   const m = /^#s=([\w-]+)/.exec(location.hash);
   if (m) {
     try {

@@ -1,7 +1,7 @@
 // Bundles the app into one self-contained, minified HTML file: dist/localtree.html.
 // It works offline and when opened directly from disk (file://).
 import { build } from 'esbuild';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile, chmod } from 'node:fs/promises';
 
 const js = await build({
   entryPoints: ['src/main.js'], bundle: true, minify: true, format: 'iife', target: 'es2022', write: false,
@@ -16,3 +16,15 @@ html = html
 await mkdir('dist', { recursive: true });
 await writeFile('dist/localtree.html', html);
 console.log(`dist/localtree.html  ${(html.length / 1024).toFixed(0)} KB`);
+
+// Command line: one file with the viewer embedded, runnable with plain Node (no node_modules).
+await build({
+  entryPoints: ['bin/localtree.mjs'], bundle: true, minify: true, platform: 'node', format: 'esm', target: 'node18',
+  outfile: 'dist/localtree-cli.mjs',
+  define: { __LOCALTREE_VIEWER__: JSON.stringify(html) },
+});
+// Copy into the example Nextflow pipeline's bin/ (Nextflow puts bin/ on PATH).
+await copyFile('dist/localtree-cli.mjs', 'nextflow/bin/localtree');
+await chmod('dist/localtree-cli.mjs', 0o755);
+await chmod('nextflow/bin/localtree', 0o755);
+console.log('dist/localtree-cli.mjs, nextflow/bin/localtree');

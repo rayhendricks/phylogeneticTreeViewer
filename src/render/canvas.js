@@ -8,7 +8,7 @@ for (const c of 'ED') AA[c] = '#c048c0';
 for (const c of 'NQST') AA[c] = '#15c015';
 AA.C = '#f08080'; AA.G = '#f09048'; AA.P = '#c0c000'; AA.H = '#15a4a4'; AA.Y = '#15a4a4'; AA.X = '#b0b0b0';
 
-function schemeFor(prim) {
+export function schemeFor(prim) {
   if (prim.scheme === 'nucleotide') return NUC;
   if (prim.scheme === 'protein') return AA;
   let nuc = 0, tot = 0;

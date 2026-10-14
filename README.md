@@ -46,6 +46,44 @@ No server, no account, no uploads.
 - Shareable links: the whole session is compressed into the link itself (after `#`), so it is never sent to a server.
 - The current session is autosaved in the browser.
 
+## Command line and dashboards
+
+`dist/localtree-cli.mjs` is a single file that runs with Node 18+ (no install). Copy it anywhere as `localtree`.
+
+```sh
+# One family: SVG figure, self-contained interactive HTML viewer, and a session file
+localtree render --tree OG0000123.treefile \
+  --annot species.tsv --annot OG0000123.aln.fasta --annot OG0000123.domains.txt \
+  --midpoint --color-by species --meta expansion=+12 --out results/OG0000123
+
+# Many families: one dashboard folder (index.html + data/), browsable offline
+localtree dashboard --out results/dashboard --title "Gene families" --svg results/*.session.json
+```
+
+- `--annot` takes iTOL annotation files, FASTA alignments and CSV/TSV tables (first column matching leaf names is
+  used as the ID; other columns become datasets by type). Repeat it for several files.
+- `--color-by` takes `support`, `length`, `attr:KEY` or the name of a color-strip dataset (e.g. a table column).
+- `--set KEY=VALUE` sets any display option (`--set mode=circular`, `--set alignLabels=false`).
+- `--meta KEY=VALUE` adds a column to the dashboard's family table (sortable and filterable).
+- The dashboard lists every family; click one (or press `[` / `]`) to open it in the full interactive viewer.
+  "Keep my display settings" carries your layout and colors across families. It works from disk or any web server.
+- SVG output from the command line estimates label widths from font metrics, so it can differ slightly from the browser.
+  Use the viewer's Export for pixel-exact PNG/SVG.
+
+### Nextflow
+
+`nextflow/modules/localtree.nf` provides `LOCALTREE_RENDER` (per family) and `LOCALTREE_DASHBOARD` (collects all).
+`nextflow/main.nf` is a working example:
+
+```sh
+nextflow run nextflow/main.nf -profile docker \
+  --trees 'results/trees/*.treefile' --annotations 'results/annot/*' --species species.tsv --outdir localtree_out
+```
+
+Annotation files are matched to a family by name prefix (`OG0000123.*`). The module uses the stock
+`node:22-slim` image; `localtree` comes from the pipeline's `bin/` folder (`npm run build` copies it there).
+A `Dockerfile` is included if you prefer a dedicated image. Extra options go in `ext.args` (see `nextflow/nextflow.config`).
+
 ## Performance
 
 The tree is drawn on a Canvas with viewport culling and level-of-detail (labels too small to read are skipped).
@@ -76,9 +114,11 @@ Native ES modules, no runtime dependencies. Serve the folder (`npm run serve`) a
 | `src/render/scene.js` | Builds the drawing primitives for tree and datasets |
 | `src/render/canvas.js`, `svg.js` | Canvas painter and SVG writer for those primitives |
 | `src/render/color.js` | Palettes, ramps, OKLab interpolation |
-| `src/ui/` | App controller, pan/zoom, side panels |
+| `src/ui/` | App controller, pan/zoom, side panels, dashboard mode |
+| `src/cli/` | Command line (`render`, `dashboard`) |
+| `nextflow/` | Nextflow module and example pipeline |
 
 ```sh
 npm test        # unit tests (Node 18+)
-npm run build   # dist/localtree.html (needs `npm install` once for esbuild)
+npm run build   # dist/localtree.html, dist/localtree-cli.mjs, nextflow/bin/localtree (needs `npm install` once)
 ```
