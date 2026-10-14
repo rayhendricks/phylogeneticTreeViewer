@@ -1,22 +1,36 @@
 # LocalTree
 
-LocalTree is an interactive phylogenetic tree viewer and annotator modelled on [iTOL](https://itol.embl.de/), running entirely in the browser.
-No server, no account, no uploads: open `index.html` directly or host the folder on any static server (e.g. GitHub Pages).
+LocalTree is a fast phylogenetic tree viewer and annotator modelled on [iTOL](https://itol.embl.de/), running entirely in the browser.
+No server, no account, no uploads.
+
+- **Hosted:** serve the folder from any static host (e.g. GitHub Pages) and open `index.html`.
+- **Offline / double-click:** `npm run build` produces `dist/localtree.html`, a single self-contained file (about 140 KB, 50 KB gzipped) that also works when opened straight from disk.
 
 ## Features
 
 **Input**
 - Trees: Newick, NHX and BEAST/FigTree `[&key=value]` comments, NEXUS (TRANSLATE tables, multiple trees), phyloXML.
-- iTOL annotation files: `DATASET_COLORSTRIP`, `SIMPLEBAR`, `MULTIBAR`, `HEATMAP`, `GRADIENT`, `BINARY`, `TEXT`, `SYMBOL`,
-  `DATASET_STYLE`, `TREE_COLORS`, `LABELS`, `COLLAPSE`. Node IDs can be names or `A|B` (last common ancestor).
+- Taxonomy trees: paste scientific names or NCBI taxonomy IDs; lineages are fetched from NCBI E-utilities.
+- iTOL annotation files: `COLORSTRIP`, `SIMPLEBAR`, `MULTIBAR`, `HEATMAP`, `GRADIENT`, `BINARY`, `EXTERNALSHAPE`, `TEXT`, `SYMBOL`,
+  `PIECHART`, `DOMAINS`, `ALIGNMENT`, `BOXPLOT`, `LINECHART`, `CONNECTION`, `IMAGE`, `DATASET_STYLE`, `TREE_COLORS`, `LABELS`, `COLLAPSE`.
+  Node IDs can be names or `A|B` (last common ancestor).
+- FASTA alignments (sequence names matching leaves).
 - CSV/TSV metadata tables, with automatic ID-column detection and per-column choice of strip, gradient, bars, heatmap,
-  stacked bars, presence/absence, text, or display-name mapping.
+  stacked bars, pie slices, presence/absence, text, or display-name mapping.
 - Drag and drop, file picker, or paste. The file type is detected automatically.
 
 **Display**
 - Rectangular, circular (arc, rotation, inner radius), slanted and unrooted (equal-angle) layouts.
 - Phylogram or cladogram, aligned labels, support values as text or scaled symbols, branch length values, scale bar, legend.
 - Clade highlights, branch/clade/label colors, label backgrounds, collapsed clades.
+
+**Colors**
+- Global background, branch and label colors, and font.
+- Color branches by support, branch length, any numeric NHX/BEAST attribute (with perceptual color ramps), or by a
+  categorical dataset (a clade is colored when all its leaves share a category).
+- Per-dataset color editors: category colors, field colors, heatmap ramps and value ranges, domain colors, alignment schemes.
+- Built-in palettes (Tableau, Okabe-Ito colorblind-safe, ColorBrewer) and ramps (Viridis, Magma, Cividis, diverging),
+  plus your own saved palettes. Gradients are interpolated in OKLab so they look even.
 - Dark mode.
 
 **Editing** (all undoable)
@@ -27,9 +41,17 @@ No server, no account, no uploads: open `index.html` directly or host the folder
 - Select nodes to see root paths, their last common ancestor and a patristic distance matrix (copyable as TSV).
 - Hover for branch length, support, root distance, NHX attributes and dataset values.
 
-**Output**
+**Output and sharing**
 - SVG and high-resolution PNG, Newick, and session JSON (tree, styles, datasets, settings).
+- Shareable links: the whole session is compressed into the link itself (after `#`), so it is never sent to a server.
 - The current session is autosaved in the browser.
+
+## Performance
+
+The tree is drawn on a Canvas with viewport culling and level-of-detail (labels too small to read are skipped).
+Branches are batched into a few dozen paths, and large trees pan and zoom from a cached frame, then redraw sharply
+when the motion stops. A 5,000-leaf tree builds its scene in about 0.1 s and pans at display frame rate.
+SVG export uses the same scene description, so exports match the screen.
 
 ## Keyboard
 
@@ -45,20 +67,18 @@ No server, no account, no uploads: open `index.html` directly or host the folder
 
 ## Development
 
-No build step. Code layout:
+Native ES modules, no runtime dependencies. Serve the folder (`npm run serve`) and open http://localhost:8000.
 
-| File | Purpose |
+| Path | Purpose |
 | --- | --- |
-| `js/tree.js` | Tree model and operations (reroot, midpoint, prune, ladderize, snapshots) |
-| `js/newick.js` | Newick/NHX, NEXUS and phyloXML parsers; Newick writer |
-| `js/annotations.js` | iTOL annotation and CSV/TSV import |
-| `js/layout.js` | Leaf order, depths, equal-angle layout |
-| `js/render.js` | SVG scene generation (shared by the canvas and exports) |
-| `js/app.js` | UI, interaction, persistence |
-| `vendor/d3.min.js` | d3 v7.9.0 (pan/zoom and color interpolation), vendored so the app works offline |
-
-Run the tests (Node 18+):
+| `src/core/` | Tree model and operations; abstract layout |
+| `src/io/` | Parsers (Newick, NEXUS, phyloXML, iTOL, CSV/TSV, FASTA), NCBI taxonomy, share links, samples |
+| `src/render/scene.js` | Builds the drawing primitives for tree and datasets |
+| `src/render/canvas.js`, `svg.js` | Canvas painter and SVG writer for those primitives |
+| `src/render/color.js` | Palettes, ramps, OKLab interpolation |
+| `src/ui/` | App controller, pan/zoom, side panels |
 
 ```sh
-npm test
+npm test        # unit tests (Node 18+)
+npm run build   # dist/localtree.html (needs `npm install` once for esbuild)
 ```

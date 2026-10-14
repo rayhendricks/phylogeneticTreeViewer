@@ -1,12 +1,11 @@
-'use strict';
-const test = require('node:test');
-const assert = require('node:assert/strict');
-require('../js/tree.js');
-require('../js/newick.js');
-require('../js/annotations.js');
-require('../js/layout.js');
-require('../js/samples.js');
-const { Tree: T, Newick: N, Annotations: A, Layout: L, Samples } = globalThis.PTV;
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as T from '../src/core/tree.js';
+import * as N from '../src/io/newick.js';
+import * as A from '../src/io/annotations.js';
+import * as L from '../src/core/layout.js';
+import { SAMPLES as Samples } from '../src/io/samples.js';
+import { safeColor } from '../src/render/color.js';
 
 const names = root => T.leaves(root).map(n => n.name).sort();
 const close = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -190,7 +189,7 @@ test('iTOL annotation parsing: tree-level annotations mutate styles', () => {
 test('annotation colors are sanitised', () => {
   const ds = A.datasetFromItol(A.parseItol('DATASET_COLORSTRIP\nSEPARATOR COMMA\nDATA\nA,"/><script>x</script>\n'));
   assert.equal(ds.rows[0].color, '#cccccc');
-  assert.equal(A.safeColor('rgba(1,2,3,0.5)'), 'rgba(1,2,3,0.5)');
+  assert.equal(safeColor('rgba(1,2,3,0.5)'), 'rgba(1,2,3,0.5)');
 });
 
 test('table import builds typed datasets', () => {

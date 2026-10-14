@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LocalTree</title>
-  <meta name="description" content="Interactive phylogenetic tree viewer and annotator. Runs entirely in the browser.">
-  <link rel="stylesheet" href="css/style.css">
-  <script src="vendor/d3.min.js"></script>
+  <meta name="description" content="LocalTree: fast phylogenetic tree viewer and annotator that runs entirely in your browser.">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="src/main.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -21,8 +21,11 @@
       <button class="btn" id="btn-open" title="Open tree, annotation, table or session files (Ctrl+O)">
         <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Open</span>
       </button>
-      <button class="btn" id="btn-paste" title="Paste a tree, iTOL annotation or table">
+      <button class="btn" id="btn-paste" title="Paste a tree, iTOL annotation, table or FASTA alignment">
         <svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9z"/></svg><span>Paste</span>
+      </button>
+      <button class="btn" id="btn-taxonomy" title="Build a tree from NCBI Taxonomy names or IDs">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span>Taxonomy</span>
       </button>
       <select id="sample-select" class="select" title="Example trees">
         <option value="">Examples…</option>
@@ -44,6 +47,7 @@
           <button data-export="newick">Newick tree (.nwk)</button>
           <button data-export="copy-newick">Copy Newick to clipboard</button>
           <button data-export="session">Session (.json)</button>
+          <button data-export="share">Copy shareable link</button>
         </div>
       </div>
       <button class="icon-btn" id="btn-theme" title="Toggle dark mode" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
@@ -112,9 +116,48 @@
       </details>
 
       <details class="section" open>
+        <summary>Colors &amp; style</summary>
+        <div class="color-grid">
+          <label>Background <span><input type="color" data-color-setting="bgColor"><button class="mini" data-reset="bgColor" title="Use theme default">↺</button></span></label>
+          <label>Branches <span><input type="color" data-color-setting="branchColor"><button class="mini" data-reset="branchColor" title="Use theme default">↺</button></span></label>
+          <label>Labels <span><input type="color" data-color-setting="labelColor"><button class="mini" data-reset="labelColor" title="Use theme default">↺</button></span></label>
+        </div>
+        <div class="field row">
+          <label for="font-select">Font</label>
+          <select class="select" id="font-select" data-setting="fontFamily">
+            <option value="Helvetica, Arial, sans-serif">Helvetica / Arial</option>
+            <option value="'Times New Roman', Times, serif">Times</option>
+            <option value="Georgia, serif">Georgia</option>
+            <option value="Verdana, sans-serif">Verdana</option>
+            <option value="'Courier New', monospace">Courier</option>
+            <option value="system-ui, sans-serif">System UI</option>
+          </select>
+        </div>
+        <div class="field row">
+          <label for="branch-color-by">Color branches by</label>
+          <select class="select" id="branch-color-by" data-setting="branchColorBy"></select>
+        </div>
+        <div class="field row" id="branch-ramp-row">
+          <select class="select" id="branch-ramp" data-setting="branchRamp" aria-label="Color ramp"></select>
+          <label class="check inline"><input type="checkbox" data-setting="branchRampReverse"> Reverse</label>
+        </div>
+        <div class="field row">
+          <label for="palette-select">Palette for new categories</label>
+          <select class="select" id="palette-select" data-setting="palette"></select>
+        </div>
+        <details class="sub">
+          <summary>My palettes</summary>
+          <div id="palette-list" class="palette-list"></div>
+          <input class="input" id="palette-name" placeholder="Palette name">
+          <textarea class="input mono" id="palette-colors" rows="2" placeholder="#1b9e77, #d95f02, #7570b3 …"></textarea>
+          <button class="btn sm" id="palette-save">Save palette</button>
+        </details>
+      </details>
+
+      <details class="section" open>
         <summary>Datasets <span class="count" id="ds-count"></span></summary>
         <div class="btn-grid">
-          <button class="btn sm" id="btn-import-annot" title="iTOL annotation files: COLORSTRIP, SIMPLEBAR, MULTIBAR, HEATMAP, BINARY, TEXT, SYMBOL, GRADIENT, TREE_COLORS, DATASET_STYLE, LABELS, COLLAPSE">Annotation file</button>
+          <button class="btn sm" id="btn-import-annot" title="iTOL annotation files (all common dataset types) or FASTA alignments">Annotation / FASTA</button>
           <button class="btn sm" id="btn-import-table" title="CSV/TSV with one row per leaf">Metadata table</button>
         </div>
         <div id="ds-list" class="ds-list"></div>
@@ -146,10 +189,10 @@
     </aside>
 
     <main id="stage">
-      <svg id="canvas" role="img" aria-label="Phylogenetic tree"><g id="viewport"><g id="scene"></g></g></svg>
+      <canvas id="canvas" role="img" aria-label="Phylogenetic tree"></canvas>
       <div id="empty-state" hidden>
         <p><strong>Drop a tree file here</strong></p>
-        <p class="muted">Newick, NHX, NEXUS, phyloXML. Then drop iTOL annotation files or CSV/TSV tables to add datasets.</p>
+        <p class="muted">Newick, NHX, NEXUS, phyloXML. Then drop iTOL annotation files, CSV/TSV tables or FASTA alignments to add datasets.</p>
       </div>
       <div class="zoom-ctrl">
         <button class="icon-btn" id="zoom-in" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -202,13 +245,29 @@
     </form>
   </dialog>
 
+  <dialog id="taxonomy-dialog" class="dialog">
+    <form method="dialog">
+      <h3>Tree from NCBI Taxonomy</h3>
+      <p class="muted small">Scientific names or NCBI taxonomy IDs, one per line. Lineages are fetched from NCBI E-utilities; nothing else leaves your browser.</p>
+      <textarea id="tax-input" class="input mono" rows="10" placeholder="Homo sapiens&#10;Mus musculus&#10;9615&#10;Danio rerio"></textarea>
+      <label class="check"><input type="checkbox" id="tax-ranks"> Keep every rank (no collapsing of single-child ranks)</label>
+      <p id="tax-status" class="small muted"></p>
+      <div class="actions">
+        <button class="btn" value="cancel" id="tax-cancel">Cancel</button>
+        <button class="btn primary" id="tax-build" type="button">Build tree</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="help-dialog" class="dialog">
     <form method="dialog">
       <h3>Help</h3>
       <h4>Input formats</h4>
       <ul class="small">
         <li><b>Trees:</b> Newick (with NHX / BEAST <code>[&amp;…]</code> comments), NEXUS (with TRANSLATE, multiple trees), phyloXML.</li>
-        <li><b>iTOL annotation files:</b> DATASET_COLORSTRIP, SIMPLEBAR, MULTIBAR, HEATMAP, GRADIENT, BINARY, TEXT, SYMBOL, DATASET_STYLE, TREE_COLORS, LABELS, COLLAPSE. Node IDs can be names or <code>A|B</code> (last common ancestor).</li>
+        <li><b>iTOL annotation files:</b> COLORSTRIP, SIMPLEBAR, MULTIBAR, HEATMAP, GRADIENT, BINARY, EXTERNALSHAPE, TEXT, SYMBOL, PIECHART, DOMAINS, ALIGNMENT, BOXPLOT, LINECHART, CONNECTION, IMAGE, DATASET_STYLE, TREE_COLORS, LABELS, COLLAPSE. Node IDs can be names or <code>A|B</code> (last common ancestor).</li>
+        <li><b>Alignments:</b> FASTA files whose sequence names match leaf names.</li>
+        <li><b>Taxonomy:</b> build a tree from NCBI scientific names or taxonomy IDs.</li>
         <li><b>Tables:</b> CSV/TSV with a header row and one row per leaf. Each column becomes a strip, bar, heatmap, presence/absence, text or new display name.</li>
         <li><b>Sessions:</b> JSON exported from this app (tree, styles, datasets, settings).</li>
       </ul>
@@ -232,12 +291,5 @@
     </form>
   </dialog>
 
-  <script src="js/tree.js"></script>
-  <script src="js/newick.js"></script>
-  <script src="js/annotations.js"></script>
-  <script src="js/layout.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/samples.js"></script>
-  <script src="js/app.js"></script>
 </body>
 </html>
