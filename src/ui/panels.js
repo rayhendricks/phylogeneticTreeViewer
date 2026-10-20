@@ -83,7 +83,14 @@ export function initPanels(app) {
       const inp = e.target.closest('[data-setting]');
       if (inp && (inp.tagName === 'SELECT' || inp.type === 'checkbox')) {
         const v = readInput(inp);
-        app.liveEdit(() => { state.settings[inp.dataset.setting] = v; });
+        app.liveEdit(() => {
+          state.settings[inp.dataset.setting] = v;
+          // The global palette recolors datasets whose colors it chose (tables, MEME), not hand-picked ones.
+          if (inp.dataset.setting === 'palette') {
+            const pal = allPalettes()[v];
+            state.datasets.forEach((d, i) => { if (d.autoColor && pal) cow(i, x => applyPaletteTo(x, pal)); });
+          }
+        });
       }
       app.commitLive();
     }
@@ -274,23 +281,24 @@ export function initPanels(app) {
     const t = e.target;
     const act = t.dataset.dsAct;
     const live = fn => app.liveEdit(() => cow(i, fn));
+    const recolor = fn => live(d => { fn(d); d.autoColor = false; });
 
     if (e.type === 'input') {
       if (act === 'width') live(d => { d.width = +t.value; });
-      else if (act === 'color') live(d => { d.color = t.value; });
+      else if (act === 'color') recolor(d => { d.color = t.value; });
       else if (act === 'backbone') live(d => { d.opts.backbone = t.value; });
       else if (act === 'cell') live(d => { d.opts.cell = +t.value; });
       else if (act === 'conn-color') live(d => { d.rows = d.rows.map(r => ({ ...r, color: t.value })); });
-      else if (t.dataset.cat != null) live(d => { const k = t.dataset.cat; d.rows = d.rows.map(r => ((r.label || r.color) === k ? { ...r, color: t.value } : r)); });
-      else if (t.dataset.field != null) live(d => { d.fields[+t.dataset.field].color = t.value; });
-      else if (t.dataset.dom != null) live(d => { const k = t.dataset.dom; d.rows = d.rows.map(r => ({ ...r, domains: r.domains.map(x => ((x.label || x.shape) === k ? { ...x, color: t.value } : x)) })); });
+      else if (t.dataset.cat != null) recolor(d => { const k = t.dataset.cat; d.rows = d.rows.map(r => ((r.label || r.color) === k ? { ...r, color: t.value } : r)); });
+      else if (t.dataset.field != null) recolor(d => { d.fields[+t.dataset.field].color = t.value; });
+      else if (t.dataset.dom != null) recolor(d => { const k = t.dataset.dom; d.rows = d.rows.map(r => ({ ...r, domains: r.domains.map(x => ((x.label || x.shape) === k ? { ...x, color: t.value } : x)) })); });
       else if (t.dataset.stop != null) live(d => { d.opts.stops[+t.dataset.stop] = t.value; });
       else if (t.dataset.minmax) { const v = t.value === '' ? null : parseFloat(t.value); live(d => { d.opts[t.dataset.minmax] = isFinite(v) ? v : null; }); }
       return;
     }
     if (e.type === 'change') {
       if (act === 'visible') { app.liveEdit(() => cow(i, d => { d.visible = t.checked; })); app.commitLive(); }
-      else if (act === 'palette' && t.value) { const pal = allPalettes()[t.value]; app.mutate(() => cow(i, d => applyPaletteTo(d, pal))); }
+      else if (act === 'palette' && t.value) { const pal = allPalettes()[t.value]; app.mutate(() => cow(i, d => { applyPaletteTo(d, pal); d.autoColor = false; })); }
       else if (act === 'ramp' && t.value) app.mutate(() => cow(i, d => { d.opts.stops = [...RAMPS[t.value]]; }));
       else if (act === 'scheme') app.mutate(() => cow(i, d => { d.opts.scheme = t.value; }));
       else app.commitLive();
