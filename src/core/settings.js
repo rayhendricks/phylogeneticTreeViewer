@@ -8,6 +8,11 @@ export const DEFAULTS = {
   showScale: true, dimNonHits: true, rangeOpacity: 0.35, datasetGap: 6,
   fontFamily: 'Helvetica, Arial, sans-serif', bgColor: null, branchColor: null, labelColor: null,
   branchColorBy: 'none', branchRamp: 'Viridis', branchRampReverse: false, palette: 'Tableau 10',
+  curved: false, flip: false, daylight: 0, branchGradient: false,
+  branchWidthBy: 'none', widthMin: 0.5, widthMax: 4,
+  scaleGrid: false, scaleAxis: 'distance', timeFactor: 1, branchLengthMode: 'length',
+  rangeMeta: 'none', rangeMetaColor: '#4e79a7', supportSource: 'support', supportShape: 2,
+  nodeShape: 2, nodeSize: null, multiStyle: null,
 };
 
 // Size-dependent defaults for a freshly loaded tree.

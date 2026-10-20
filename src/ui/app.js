@@ -4,6 +4,7 @@ import * as Newick from '../io/newick.js';
 import * as Ann from '../io/annotations.js';
 import { SAMPLES } from '../io/samples.js';
 import { encodeSession, decodeSession } from '../io/share.js';
+import { treeFromJplace } from '../io/jplace.js';
 import { fetchTaxa, treeFromLineages } from '../io/taxonomy.js';
 import { buildScene, leafMap, fmtNum, SELECTION_COLORS } from '../render/scene.js';
 import { paint } from '../render/canvas.js';
@@ -116,7 +117,7 @@ const view = new View(el.canvas, () => {
   schedulePaint();
 });
 const ctx2d = el.canvas.getContext('2d');
-let hover = null, paintQueued = false, rebuildQueued = false, fitNext = false;
+let hoverNode = null, hover = null, paintQueued = false, rebuildQueued = false, fitNext = false;
 
 function schedulePaint() {
   if (paintQueued) return;
@@ -339,8 +340,15 @@ export async function ingest(text, kind, name) {
     if (trees.length > 1) toast(`${trees.length} trees in file. Showing the first; switch in the Tree panel.`);
     return;
   }
+  if (kind === 'jplace') {
+    const r = treeFromJplace(text);
+    setTree(r.root, name || 'Placements', { fileTrees: null });
+    toast(`${r.placed} placement(s) grafted onto their best edge` + (r.missing ? `, ${r.missing} on unknown edges` : ''));
+    return;
+  }
   requireTree();
-  if (kind === 'annotation') applyAnnotationText(text, true);
+  if (kind === 'meme') addDataset(Ann.datasetFromMeme(text, (name || 'MEME motifs').replace(/\.[^.]+$/, '')), true);
+  else if (kind === 'annotation') await applyAnnotationText(text, true);
   else if (kind === 'fasta') addDataset(Ann.datasetFromFasta(text, (name || 'Alignment').replace(/\.[^.]+$/, '')), true);
   else if (kind === 'table') await panels.openTableWizard(Ann.parseTable(text), name);
 }
@@ -351,7 +359,7 @@ async function handleFiles(fileList) {
   if (!files.length) return;
   batchNotes = files.length > 1 ? [] : null;
   const items = await Promise.all(files.map(async f => ({ name: f.name, text: await f.text() })));
-  const order = { session: 0, tree: 1, annotation: 2, fasta: 3, table: 4 };
+  const order = { session: 0, jplace: 1, tree: 1, annotation: 2, meme: 3, fasta: 3, table: 4 };
   items.forEach(it => { it.kind = detectKind(it.text, it.name); });
   items.sort((a, b) => order[a.kind] - order[b.kind]);
   for (const it of items) {
@@ -369,15 +377,45 @@ function addDataset(ds, notify) {
   else if (notify) toast(`Added ${msg}`, matched ? 'info' : 'error');
 }
 
-function applyAnnotationText(text, notify) {
+async function applyAnnotationText(text, notify) {
   const p = Ann.parseItol(text);
   if (Ann.isTreeAnnotation(p.type)) {
     let res;
-    mutate(() => { res = Ann.applyTreeAnnotation(p, state.index); });
+    mutate(() => {
+      res = Ann.applyTreeAnnotation(p, state.index);
+      if (res.multiStyle) state.settings.multiStyle = res.multiStyle;
+      if (res.prune && res.prune.size && !Tree.prune(state.tree, res.prune)) { res = null; throw new Error('PRUNE: nothing left to keep'); }
+    });
+    if (!res) return;
     if (notify) toast(`${p.type}: ${res.applied} row(s) applied` + (res.missing.length ? `, ${res.missing.length} ID(s) not found (e.g. ${res.missing.slice(0, 3).join(', ')})` : ''));
+    if (res.taxonomy && res.taxonomy.length) await applyTaxonomyIds(res.taxonomy, res.labelFormat);
     return;
   }
-  addDataset(Ann.datasetFromItol(p), notify);
+  const ds = Ann.datasetFromItol(p);
+  addDataset(ds, notify);
+  // COLOR_BRANCHES on a color strip colors the tree's branches by its categories.
+  if (ds.type === 'colorstrip' && ds.opts && ds.opts.colorBranches) { state.settings.branchColorBy = 'cat:' + ds.id; panels.sync(); rebuild(); }
+}
+
+// AUTO_TAXONOMY: look up NCBI taxonomy IDs, store each rank as metadata and relabel leaves.
+const RANKS = ['superkingdom', 'kingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species'];
+async function applyTaxonomyIds(pairs, labelFormat) {
+  toast(`Fetching ${pairs.length} taxonomy IDs from NCBI…`, 'info', 4000);
+  let taxa;
+  try { ({ taxa } = await fetchTaxa(pairs.map(p => p[1]))); } catch (e) { toast('NCBI taxonomy lookup failed: ' + e.message, 'error'); return; }
+  const byId = new Map(taxa.map(t => [t.id, t]));
+  mutate(() => {
+    for (const [nodeId, taxid] of pairs) {
+      const n = Tree.resolveSpec(state.index, nodeId), t = byId.get(taxid);
+      if (!n || !t) continue;
+      const attrs = { ...(n.attrs || {}), taxid, scientific_name: t.name };
+      for (const l of [...t.lineage, t]) if (RANKS.includes(l.rank)) attrs[l.rank] = l.name;
+      n.attrs = attrs;
+      const label = labelFormat ? labelFormat.replace(/%(\w+)%?/g, (m, k) => attrs[k.toLowerCase()] ?? '') : t.name;
+      Tree.setStyle(n, { displayName: label.trim() || t.name });
+    }
+  });
+  toast(`Taxonomy applied to ${pairs.filter(p => byId.has(p[1])).length} node(s)`);
 }
 
 function loadSample(i) {
@@ -388,8 +426,10 @@ function loadSample(i) {
   if (sm.annotations) {
     for (const text of sm.annotations) {
       const p = Ann.parseItol(text);
-      if (Ann.isTreeAnnotation(p.type)) Ann.applyTreeAnnotation(p, state.index);
-      else state.datasets.push(Ann.datasetFromItol(p));
+      if (Ann.isTreeAnnotation(p.type)) {
+        const r = Ann.applyTreeAnnotation(p, state.index);
+        if (r.multiStyle) state.settings.multiStyle = r.multiStyle;
+      } else state.datasets.push(Ann.datasetFromItol(p));
     }
     Object.assign(state.settings, { alignLabels: true, italic: false }, sm.settings || {});
     afterChange({ fit: true });
@@ -572,7 +612,7 @@ function nodeAt(clientX, clientY) {
     // Dataset columns: map the row (or angle) back to its leaf.
     const R = state.scene.rows;
     if (R.n && !R.circ && R.rect && x > R.treeEnd) {
-      const i = Math.round(y / R.rowH);
+      const i = nearestRow(R.tipYs, y);
       if (i >= 0 && i < R.n && R.cells.some(([a, b]) => x >= a && x <= b)) best = R.tips[i];
     } else if (R.n && R.circ) {
       const rr = Math.hypot(x, y);
@@ -585,6 +625,18 @@ function nodeAt(clientX, clientY) {
     }
   }
   return best == null ? null : state.index.byId.get(best) || null;
+}
+
+// Binary search for the tip row closest to y (rows can have uneven spacing).
+function nearestRow(ys, y) {
+  let lo = 0, hi = ys.length - 1;
+  if (hi < 0) return -1;
+  const asc = ys[hi] >= ys[0];
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if ((ys[mid] < y) === asc) lo = mid; else hi = mid;
+  }
+  return Math.abs(ys[lo] - y) <= Math.abs(ys[hi] - y) ? lo : hi;
 }
 
 function hoverPrim(node) {
@@ -613,7 +665,30 @@ function datasetValueText(ds, row) {
   }
 }
 
+// POPUP_INFO html: keep basic formatting tags and safe images/links, drop everything else.
+const POPUP_TAGS = new Set(['b', 'i', 'u', 'em', 'strong', 'br', 'p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'img', 'a', 'sub', 'sup', 'hr']);
+function sanitizeHTML(html) {
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+  const walk = node => {
+    for (const c of Array.from(node.children)) {
+      const tag = c.tagName.toLowerCase();
+      if (!POPUP_TAGS.has(tag)) { c.replaceWith(...(['script', 'style', 'iframe', 'object'].includes(tag) ? [] : c.childNodes)); continue; }
+      for (const a of Array.from(c.attributes)) {
+        const ok = (tag === 'img' && ['src', 'width', 'height', 'alt'].includes(a.name)) || (tag === 'a' && a.name === 'href') || a.name === 'style' && !/url\(|expression/i.test(a.value);
+        if (!ok || ((a.name === 'src' || a.name === 'href') && !Ann.safeUrl(a.value))) c.removeAttribute(a.name);
+      }
+      if (tag === 'a') { c.setAttribute('target', '_blank'); c.setAttribute('rel', 'noopener noreferrer'); }
+      walk(c);
+    }
+  };
+  walk(doc.body.firstChild);
+  return doc.body.firstChild.innerHTML;
+}
+
 function tooltipHTML(n) {
+  if (n.style && (n.style.popupHtml || n.style.popupTitle)) {
+    return `<b>${esc(n.style.popupTitle || nodeLabel(n))}</b><div class="popup">${sanitizeHTML(n.style.popupHtml || '')}</div>`;
+  }
   const rows = [];
   if (n.length != null) rows.push(['Branch length', fmtNum(n.length)]);
   if (n.support != null) rows.push(['Support', fmtNum(n.support)]);
@@ -672,6 +747,8 @@ function openContextMenu(node, x, y) {
     ${item('clear-style', leaf ? 'Clear styles' : 'Clear styles in clade')}
     <hr>
     ${item('rename', 'Set display name…')}
+    ${item('truncate', node.style && node.style.truncate != null ? 'Restore branch length' : 'Truncate branch…', !root)}
+    ${item('spacing', leaf ? 'Set leaf spacing…' : 'Set leaf spacing in clade…')}
     ${item('range-label', 'Set highlight label…', !!(node.style && node.style.range))}
     ${item('copy-newick', 'Copy subtree as Newick', !leaf)}
     ${item('copy-names', 'Copy leaf names', !leaf)}
@@ -713,7 +790,11 @@ function onContextMenu(e) {
   const b = e.target.closest('[data-ctx]');
   if (!b) return;
   closeContextMenu();
-  switch (b.dataset.ctx) {
+  ctxAction(b.dataset.ctx, node);
+}
+
+function ctxAction(act, node) {
+  switch (act) {
     case 'select': toggleSelect(node.id); refreshOverlay(); break;
     case 'collapse': mutate(() => { node.collapsed = !node.collapsed; }); break;
     case 'reroot': mutate(() => Tree.reroot(state.tree, node), { fit: true }); break;
@@ -739,8 +820,22 @@ function onContextMenu(e) {
     case 'copy-name': copyText(node.name, 'Name copied'); break;
     case 'extract': mutate(() => Tree.extractClade(state.tree, node), { fit: true }); break;
     case 'delete': mutate(() => Tree.removeClade(state.tree, node), { fit: true }); break;
+    case 'truncate': {
+      if (node.style && node.style.truncate != null) { mutate(() => Tree.setStyle(node, { truncate: null })); break; }
+      const v = prompt('Draw this branch with length', fmtNum((node.length || 0) / 10));
+      if (v != null && isFinite(parseFloat(v))) mutate(() => Tree.setStyle(node, { truncate: Math.max(0, parseFloat(v)) }));
+      break;
+    }
+    case 'spacing': {
+      const v = prompt('Leaf spacing factor (1 = normal)', String((node.style && node.style.spacing) || 1));
+      if (v != null && parseFloat(v) > 0) mutate(() => { for (const l of node.children.length ? Tree.leaves(node) : [node]) Tree.setStyle(l, { spacing: parseFloat(v) === 1 ? null : parseFloat(v) }); });
+      break;
+    }
   }
 }
+
+// Shortcuts that act on the node under the mouse.
+const HOVER_KEYS = { c: 'collapse', r: 'reroot', t: 'rotate', l: 'ladderize', n: 'rename', s: 'select', x: 'delete', k: 'extract', b: 'truncate' };
 
 // ---------- canvas interaction ----------
 let lastClickId = null, suppressClick = false, pressTimer = null, pressStart = null;
@@ -773,6 +868,7 @@ function bindCanvas() {
   el.canvas.addEventListener('pointermove', e => {
     if (e.pointerType === 'mouse' && !e.buttons) {
       const node = nodeAt(e.clientX, e.clientY);
+      hoverNode = node;
       const hp = hoverPrim(node);
       if ((hp && hp.d) !== (hover && hover.d)) { hover = hp; schedulePaint(); }
       el.canvas.classList.toggle('over-node', !!node);
@@ -780,7 +876,7 @@ function bindCanvas() {
     }
     if (pressTimer && pressStart && Math.hypot(e.clientX - pressStart[0], e.clientY - pressStart[1]) > 10) { clearTimeout(pressTimer); pressTimer = null; }
   });
-  el.canvas.addEventListener('pointerleave', () => { hideTooltip(); if (hover) { hover = null; schedulePaint(); } });
+  el.canvas.addEventListener('pointerleave', () => { hoverNode = null; hideTooltip(); if (hover) { hover = null; schedulePaint(); } });
   el.canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse') return;
     const node = nodeAt(e.clientX, e.clientY);
@@ -800,18 +896,35 @@ function exportScene() {
   return buildScene(model(true), { theme: theme(true) });
 }
 
+// Export options from the Export menu: margin, PNG scale, visible area only.
+function exportOpts(sc) {
+  const pad = Math.max(0, parseFloat($('#exp-margin').value) || 0);
+  let bounds = sc.bounds;
+  if ($('#exp-visible').checked) {
+    const r = el.canvas.getBoundingClientRect();
+    const [x0, y0] = view.toScene(r.left, r.top), [x1, y1] = view.toScene(r.right, r.bottom);
+    const bx0 = Math.max(x0, bounds.x), by0 = Math.max(y0, bounds.y);
+    const bx1 = Math.min(x1, bounds.x + bounds.w), by1 = Math.min(y1, bounds.y + bounds.h);
+    if (bx1 > bx0 && by1 > by0) bounds = { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 };
+  }
+  return { pad, bounds, scale: $('#exp-scale').value };
+}
+
 function exportSVG() {
   const sc = exportScene();
   const th = theme(true);
-  return sceneToSVG(sc.prims, { bounds: sc.bounds, bg: th.bg, font: state.settings.fontFamily });
+  const o = exportOpts(sc);
+  return sceneToSVG(sc.prims, { bounds: o.bounds, bg: th.bg, font: state.settings.fontFamily, pad: o.pad });
 }
 
 async function exportPNG() {
   const sc = exportScene();
   const th = theme(true);
-  const pad = 16, b = sc.bounds;
+  const o = exportOpts(sc);
+  const pad = o.pad, b = o.bounds;
   const w = b.w + 2 * pad, h = b.h + 2 * pad;
-  const scale = Math.max(0.25, Math.min(4, Math.sqrt(120e6 / (w * h)), 16000 / Math.max(w, h)));
+  const maxScale = Math.min(Math.sqrt(250e6 / (w * h)), 32000 / Math.max(w, h));
+  const scale = o.scale === 'auto' ? Math.max(0.25, Math.min(4, Math.sqrt(120e6 / (w * h)), 16000 / Math.max(w, h))) : Math.min(+o.scale, maxScale);
   const draw = withImages => {
     const c = new OffscreenCanvas(Math.round(w * scale), Math.round(h * scale));
     const cx = c.getContext('2d');
@@ -835,13 +948,20 @@ async function shareLink() {
   if (url.length > 60000) toast('This link is long. Some chat apps cut long links; a session file is more reliable.', 'error');
 }
 
+function newickForExport() {
+  if (!$('#exp-labels').checked) return Newick.toNewick(state.tree.root);
+  const copy = Tree.restore(Tree.snapshot(state.tree.root));
+  for (const n of Tree.preorder(copy)) if (n.style && n.style.displayName) n.name = n.style.displayName;
+  return Newick.toNewick(copy);
+}
+
 function doExport(kind) {
   if (!state.tree) { toast('Nothing to export'); return; }
   try {
     if (kind === 'svg') download(exportSVG().svg, safeName() + '.svg', 'image/svg+xml');
     else if (kind === 'png') exportPNG().catch(e => toast('PNG export failed: ' + e.message, 'error'));
-    else if (kind === 'newick') download(Newick.toNewick(state.tree.root) + '\n', safeName() + '.nwk', 'text/plain');
-    else if (kind === 'copy-newick') copyText(Newick.toNewick(state.tree.root), 'Newick copied');
+    else if (kind === 'newick') download(newickForExport() + '\n', safeName() + '.nwk', 'text/plain');
+    else if (kind === 'copy-newick') copyText(newickForExport(), 'Newick copied');
     else if (kind === 'session') download(JSON.stringify(sessionObject()), safeName() + '.session.json', 'application/json');
     else if (kind === 'share') shareLink().catch(e => toast('Could not create link: ' + e.message, 'error'));
   } catch (e) { toast('Export failed: ' + e.message, 'error'); }
@@ -947,9 +1067,46 @@ function bind() {
       } else if (a === 'ladderize-down') mutate(() => Tree.ladderize(state.tree.root, false));
       else if (a === 'ladderize-up') mutate(() => Tree.ladderize(state.tree.root, true));
       else if (a === 'expand-all') mutate(() => { let any = false; for (const n of Tree.preorder(state.tree.root)) if (n.collapsed) { n.collapsed = false; any = true; } return any; });
-      else if (a === 'clear-styles') mutate(() => { for (const n of Tree.preorder(state.tree.root)) n.style = n.style && n.style.displayName ? { displayName: n.style.displayName } : null; });
+      else if (a === 'auto-collapse') $('#collapse-dialog').showModal();
+      else if (a === 'edit-labels') {
+        $('#labels-text').value = Tree.leaves(state.tree.root).map(l => `${l.name}\t${(l.style && l.style.displayName) || l.name}`).join('\n');
+        $('#labels-dialog').showModal();
+      } else if (a === 'clear-styles') mutate(() => { for (const n of Tree.preorder(state.tree.root)) n.style = n.style && n.style.displayName ? { displayName: n.style.displayName } : null; });
     };
   }
+
+  $('#collapse-apply').onclick = () => {
+    const rule = $('#collapse-rule').value, raw = $('#collapse-value').value.trim();
+    if (!raw) return;
+    const val = rule === 'avgLength' ? parseFloat(raw) : raw;
+    if (rule === 'avgLength' && !isFinite(val)) { toast('Enter a number', 'error'); return; }
+    let n = 0;
+    mutate(() => { n = Tree.autoCollapse(state.tree.root, { [rule]: val }); return n > 0; }, { fit: true });
+    toast(`${n} clade(s) collapsed`);
+  };
+  $('#labels-run').onclick = () => {
+    let re;
+    try { re = new RegExp($('#labels-find').value, 'g'); } catch (e) { toast('Invalid regular expression', 'error'); return; }
+    const rp = $('#labels-replace').value;
+    $('#labels-text').value = $('#labels-text').value.split('\n').map(line => {
+      const i = line.indexOf('\t');
+      return i < 0 ? line : line.slice(0, i + 1) + line.slice(i + 1).replace(re, rp);
+    }).join('\n');
+  };
+  $('#labels-apply').onclick = () => {
+    const map = new Map();
+    for (const line of $('#labels-text').value.split('\n')) {
+      const i = line.indexOf('\t');
+      if (i > 0) map.set(line.slice(0, i), line.slice(i + 1).trim());
+    }
+    mutate(() => {
+      for (const l of Tree.leaves(state.tree.root)) {
+        if (!map.has(l.name)) continue;
+        const v = map.get(l.name);
+        Tree.setStyle(l, { displayName: v && v !== l.name ? v : null });
+      }
+    });
+  };
 
   let searchTimer = null;
   el.search.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => refreshSearch(), 150); });
@@ -979,6 +1136,15 @@ function bind() {
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
     if (mod || e.altKey) return;
     const modes = { 1: 'rectangular', 2: 'circular', 3: 'slanted', 4: 'unrooted' };
+    if (hoverNode && HOVER_KEYS[e.key] && state.index.byId.get(hoverNode.id) === hoverNode) {
+      const act = HOVER_KEYS[e.key], n = hoverNode;
+      if (act === 'select') { toggleSelect(n.id); refreshOverlay(); return; }
+      if (['collapse', 'rotate', 'ladderize', 'extract'].includes(act) && !n.children.length) return;
+      if (['reroot', 'delete', 'extract', 'truncate'].includes(act) && !n.parent) return;
+      hideTooltip();
+      ctxAction(act, n);
+      return;
+    }
     if (modes[e.key]) setMode(modes[e.key]);
     else if (e.key === 'f' || e.key === 'F') fit();
     else if (e.key === '+' || e.key === '=') view.zoomCenter(1.5);
