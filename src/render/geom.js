@@ -96,3 +96,27 @@ export function labelBox(x, y, rot, flipEnd, w, h) {
   const x0 = flipEnd ? -w + 2 : -2, x1 = flipEnd ? 2 : w + 2;
   return [[x0, -h / 2], [x1, -h / 2], [x1, h / 2], [x0, h / 2]].map(([u, v]) => [x + u * c - v * s, y + u * s + v * c]);
 }
+
+// Any iTOL legend/symbol code: 1-6 symbols, 7-9 lines (solid, dashed, dotted), 10-12 arrows, or a domain code.
+// Returns { path, strokeOnly, dash }.
+export function glyph(code, cx, cy, size, p = new Path()) {
+  const h = size / 2;
+  if (typeof code === 'string' && !/^\d+$/.test(code)) {
+    const pts = DOMAIN_SHAPES[code] || DOMAIN_SHAPES.RE;
+    p.poly(pts.map(([u, v]) => [cx - h + u * size, cy + v * h * 0.8]));
+    return { path: p, strokeOnly: false };
+  }
+  const c = +code;
+  if (c >= 7 && c <= 9) {
+    p.M(cx - h, cy).L(cx + h, cy);
+    return { path: p, strokeOnly: true, dash: c === 8 ? [size / 4, size / 6] : c === 9 ? [1, size / 6] : null };
+  }
+  if (c >= 10 && c <= 12) {
+    const a = h * 0.6;
+    p.M(cx - h, cy).L(cx + h, cy);
+    if (c === 10 || c === 12) p.M(cx - h + a, cy - a).L(cx - h, cy).L(cx - h + a, cy + a);
+    if (c === 11 || c === 12) p.M(cx + h - a, cy - a).L(cx + h, cy).L(cx + h - a, cy + a);
+    return { path: p, strokeOnly: true };
+  }
+  return shapePath(c, cx, cy, size, p);
+}

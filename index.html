@@ -48,6 +48,12 @@
           <button data-export="copy-newick">Copy Newick to clipboard</button>
           <button data-export="session">Session (.json)</button>
           <button data-export="share">Copy shareable link</button>
+          <div class="menu-opts small">
+            <label>Margin <input type="number" class="input num" id="exp-margin" value="16" min="0" max="500"> px</label>
+            <label>PNG scale <select class="select" id="exp-scale"><option value="auto">auto</option><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
+            <label class="check"><input type="checkbox" id="exp-visible"> Visible area only</label>
+            <label class="check"><input type="checkbox" id="exp-labels"> Newick uses display names</label>
+          </div>
         </div>
       </div>
       <button class="icon-btn" id="btn-theme" title="Toggle dark mode" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
@@ -71,6 +77,8 @@
           <button class="btn sm" data-action="expand-all">Expand all</button>
           <button class="btn sm" data-action="clear-styles">Clear colors</button>
           <button class="btn sm" data-action="fit">Fit to view</button>
+          <button class="btn sm" data-action="auto-collapse" title="Collapse clades by distance, support, class or label">Auto-collapse…</button>
+          <button class="btn sm" data-action="edit-labels" title="Edit many leaf labels at once">Edit labels…</button>
         </div>
       </details>
 
@@ -89,8 +97,36 @@
         <div class="field range" data-modes="circular"><label>Rotation <output data-for="rotation"></output></label><input type="range" data-setting="rotation" min="-180" max="180" step="5"></div>
         <div class="field range" data-modes="circular"><label>Inner radius <output data-for="innerRadius"></output></label><input type="range" data-setting="innerRadius" min="0" max="600" step="10"></div>
         <div class="field range"><label>Line width <output data-for="lineWidth"></output></label><input type="range" data-setting="lineWidth" min="0.25" max="6" step="0.25"></div>
-        <label class="check"><input type="checkbox" data-setting="nodeDots"> Node dots</label>
+        <label class="check" data-modes="rectangular circular"><input type="checkbox" data-setting="curved"> Curved branches</label>
+        <label class="check" data-modes="rectangular slanted circular"><input type="checkbox" data-setting="flip"> Flip leaf order</label>
+        <div class="field range" data-modes="unrooted"><label>Equal-daylight passes <output data-for="daylight"></output></label><input type="range" data-setting="daylight" min="0" max="5" step="1"></div>
+        <label class="check"><input type="checkbox" data-setting="nodeDots"> Node symbols</label>
+        <div class="field row">
+          <label for="node-shape">Node shape</label>
+          <select class="select" id="node-shape" data-setting="nodeShape">
+            <option value="2">Circle</option><option value="1">Square</option><option value="3">Star</option>
+            <option value="4">Triangle right</option><option value="5">Triangle left</option>
+          </select>
+        </div>
+        <div class="field row">
+          <label for="width-by">Branch width by</label>
+          <select class="select meta-select" id="width-by" data-setting="branchWidthBy"></select>
+        </div>
+        <label class="check"><input type="checkbox" data-setting="branchGradient"> Gradient branches (with color by value)</label>
         <label class="check"><input type="checkbox" data-setting="showScale"> Scale bar</label>
+        <label class="check"><input type="checkbox" data-setting="scaleGrid"> Scale grid</label>
+        <div class="field row">
+          <label for="scale-axis">Scale axis</label>
+          <select class="select" id="scale-axis" data-setting="scaleAxis"><option value="distance">Distance from root</option><option value="age">Age (from tips)</option></select>
+        </div>
+        <div class="field row">
+          <label for="time-factor">Scale multiplier</label>
+          <input type="number" class="input num" id="time-factor" data-setting="timeFactor" step="any" min="0">
+        </div>
+        <div class="field row">
+          <label for="range-meta">Node bars (HPD)</label>
+          <select class="select meta-select" id="range-meta" data-setting="rangeMeta" data-meta="ranges"></select>
+        </div>
       </details>
 
       <details class="section" open>
@@ -102,12 +138,20 @@
         <label class="check"><input type="checkbox" data-setting="showInternalLabels"> Internal node names</label>
         <label class="check"><input type="checkbox" data-setting="showBranchLengths"> Branch length values</label>
         <div class="field row">
+          <label for="bl-mode">Branch values show</label>
+          <select class="select" id="bl-mode" data-setting="branchLengthMode"><option value="length">Branch length</option><option value="age">Node age</option></select>
+        </div>
+        <div class="field row">
           <label for="support-select">Support values</label>
           <select class="select" id="support-select" data-setting="support">
             <option value="none">Hidden</option>
             <option value="text">Text</option>
             <option value="symbol">Symbols</option>
           </select>
+        </div>
+        <div class="field row">
+          <label for="support-source">Value source</label>
+          <select class="select meta-select" id="support-source" data-setting="supportSource" data-meta="values"></select>
         </div>
         <div class="field row">
           <label for="support-min">Show support ≥</label>
@@ -222,6 +266,39 @@
     </form>
   </dialog>
 
+  <dialog id="collapse-dialog" class="dialog">
+    <form method="dialog">
+      <h3>Auto-collapse clades</h3>
+      <div class="field row">
+        <label for="collapse-rule">Collapse clades whose</label>
+        <select class="select" id="collapse-rule">
+          <option value="avgLength">average leaf distance is below</option>
+          <option value="support">support matches (e.g. &lt;70)</option>
+          <option value="nodeClass">class (LABELS file) equals</option>
+          <option value="label">name contains</option>
+        </select>
+      </div>
+      <input id="collapse-value" class="input" placeholder="value">
+      <div class="actions">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn primary" id="collapse-apply" value="apply">Collapse</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="labels-dialog" class="dialog wide">
+    <form method="dialog">
+      <h3>Edit leaf labels</h3>
+      <p class="muted small">One leaf per line: <code>ID</code>, a tab, then the label shown. Delete the label to show the ID. Optional find and replace (regular expression) runs on every label first.</p>
+      <div class="field row"><input id="labels-find" class="input" placeholder="find (regex)"><input id="labels-replace" class="input" placeholder="replace with ($1 for groups)"><button class="btn sm" id="labels-run" type="button">Replace</button></div>
+      <textarea id="labels-text" class="input mono" rows="14"></textarea>
+      <div class="actions">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn primary" id="labels-apply" value="apply">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="table-dialog" class="dialog wide">
     <form method="dialog">
       <h3>Import metadata table</h3>
@@ -265,7 +342,8 @@
       <h4>Input formats</h4>
       <ul class="small">
         <li><b>Trees:</b> Newick (with NHX / BEAST <code>[&amp;…]</code> comments), NEXUS (with TRANSLATE, multiple trees), phyloXML.</li>
-        <li><b>iTOL annotation files:</b> COLORSTRIP, SIMPLEBAR, MULTIBAR, HEATMAP, GRADIENT, BINARY, EXTERNALSHAPE, TEXT, SYMBOL, PIECHART, DOMAINS, ALIGNMENT, BOXPLOT, LINECHART, CONNECTION, IMAGE, DATASET_STYLE, TREE_COLORS, LABELS, COLLAPSE. Node IDs can be names or <code>A|B</code> (last common ancestor).</li>
+        <li><b>iTOL annotation files:</b> every iTOL dataset type (COLORSTRIP, SIMPLEBAR, MULTIBAR, HEATMAP, GRADIENT, BINARY, EXTERNALSHAPE, TEXT, SYMBOL, PIECHART, DOMAINS, ARROWS, ALIGNMENT, BOXPLOT, LINECHART, CONNECTION, IMAGE, RANGE, TIMESCALE, TANGLEGRAM) and tree file (DATASET_STYLE, TREE_COLORS, LABELS, COLLAPSE, PRUNE, SPACING, METADATA, POPUP_INFO, MULTI_STYLE, AUTO_TAXONOMY). Node IDs can be names, <code>A|B</code> or <code>A---B</code> (last common ancestor) or <code>CONTAINS==regex</code>.</li>
+        <li><b>Placements:</b> jplace files (each query grafted on its best edge). <b>Motifs:</b> MEME XML output as a domains dataset.</li>
         <li><b>Alignments:</b> FASTA files whose sequence names match leaf names.</li>
         <li><b>Taxonomy:</b> build a tree from NCBI scientific names or taxonomy IDs.</li>
         <li><b>Tables:</b> CSV/TSV with a header row and one row per leaf. Each column becomes a strip, bar, heatmap, presence/absence, text or new display name.</li>
@@ -286,6 +364,10 @@
         <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom</td></tr>
         <tr><td><kbd>/</kbd></td><td>Search</td></tr>
         <tr><td><kbd>Esc</kbd></td><td>Clear selection, close menus</td></tr>
+        <tr><td colspan="2"><b>With the mouse over a node</b></td></tr>
+        <tr><td><kbd>C</kbd> / <kbd>R</kbd> / <kbd>T</kbd> / <kbd>L</kbd></td><td>Collapse, reroot, rotate, ladderize</td></tr>
+        <tr><td><kbd>N</kbd> / <kbd>S</kbd> / <kbd>B</kbd></td><td>Rename, select, truncate branch</td></tr>
+        <tr><td><kbd>K</kbd> / <kbd>X</kbd></td><td>Keep only this clade, remove it</td></tr>
       </table>
       <div class="actions"><button class="btn primary" value="close">Close</button></div>
     </form>

@@ -2,7 +2,7 @@
 import * as Tree from '../core/tree.js';
 
 const NUMERIC = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
-const STOP = new Set(['(', ')', ',', ':', ';', '[']);
+const STOP = new Set(['(', ')', ',', ':', ';', '[', '{']);
 const isWs = c => c === ' ' || c === '\n' || c === '\r' || c === '\t';
 const SUPPORT_KEYS = ['b', 'bootstrap', 'support', 'posterior', 'prob', 'confidence'];
 
@@ -38,6 +38,7 @@ function applyComment(node, text) {
     (node.attrs || (node.attrs = {}))[k] = v;
     const lk = k.toLowerCase();
     if (SUPPORT_KEYS.includes(lk) && node.support == null && NUMERIC.test(v)) node.support = parseFloat(v);
+    if (lk === 'name' && /^&&NHX/i.test(t) && !node.name) node.name = v;
     if ((lk === '!color' || lk === 'color') && /^#[0-9a-f]{3,8}$/i.test(v)) {
       Tree.setStyle(node, { branchColor: v });
     }
@@ -78,6 +79,13 @@ function parseNewick(str) {
       }
       if (j >= n) throw new Error('Unterminated comment "["');
       applyComment(node, s.slice(i + 1, j));
+      i = j + 1;
+    } else if (c === '{') {
+      // jplace edge numbers: A:0.1{3}
+      const j = s.indexOf('}', i);
+      if (j < 0) throw new Error('Unterminated "{"');
+      const e = parseInt(s.slice(i + 1, j), 10);
+      if (isFinite(e)) node.edge = e;
       i = j + 1;
     } else if (c === ';') {
       break;

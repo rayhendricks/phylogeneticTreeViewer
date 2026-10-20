@@ -11,9 +11,15 @@ No server, no account, no uploads.
 **Input**
 - Trees: Newick, NHX and BEAST/FigTree `[&key=value]` comments, NEXUS (TRANSLATE tables, multiple trees), phyloXML.
 - Taxonomy trees: paste scientific names or NCBI taxonomy IDs; lineages are fetched from NCBI E-utilities.
-- iTOL annotation files: `COLORSTRIP`, `SIMPLEBAR`, `MULTIBAR`, `HEATMAP`, `GRADIENT`, `BINARY`, `EXTERNALSHAPE`, `TEXT`, `SYMBOL`,
-  `PIECHART`, `DOMAINS`, `ALIGNMENT`, `BOXPLOT`, `LINECHART`, `CONNECTION`, `IMAGE`, `DATASET_STYLE`, `TREE_COLORS`, `LABELS`, `COLLAPSE`.
-  Node IDs can be names or `A|B` (last common ancestor).
+- iTOL annotation files, all dataset types: `COLORSTRIP`, `SIMPLEBAR`, `MULTIBAR`, `HEATMAP`, `GRADIENT`, `BINARY`,
+  `EXTERNALSHAPE`, `TEXT`, `SYMBOL`, `PIECHART`, `DOMAINS`, `ARROWS`, `ALIGNMENT`, `BOXPLOT`, `LINECHART`, `CONNECTION`,
+  `IMAGE`, `RANGE`, `TIMESCALE`, `TANGLEGRAM`; and tree files: `DATASET_STYLE`, `TREE_COLORS`, `LABELS` (with classes),
+  `COLLAPSE`, `PRUNE`, `SPACING`, `METADATA`, `POPUP_INFO`, `MULTI_STYLE`, `AUTO_TAXONOMY`. Header options such as
+  `MARGIN`, `DATASET_SCALE`, legends, label styling and per-type display options are honored. Node IDs can be names,
+  `A|B` or `A---B` (last common ancestor), or `CONTAINS==regex`. All 44 example files from the iTOL help pages load and
+  render in rectangular and circular modes (alignments and tanglegrams are rectangular only, as in iTOL).
+- jplace placement files (Matsen et al. 2012): each query is grafted on its best edge.
+- MEME XML motif output, shown as a protein-domains dataset.
 - FASTA alignments (sequence names matching leaves).
 - CSV/TSV metadata tables, with automatic ID-column detection and per-column choice of strip, gradient, bars, heatmap,
   stacked bars, pie slices, presence/absence, text, or display-name mapping.
@@ -23,6 +29,10 @@ No server, no account, no uploads.
 - Rectangular, circular (arc, rotation, inner radius), slanted and unrooted (equal-angle) layouts.
 - Phylogram or cladogram, aligned labels, support values as text or scaled symbols, branch length values, scale bar, legend.
 - Clade highlights, branch/clade/label colors, label backgrounds, collapsed clades.
+- Curved branches, flipped leaf order, equal-daylight unrooted layout, per-leaf spacing, truncated branches.
+- Node symbols (shape and size), branch width or gradient branches by support, length or any metadata field.
+- Scale grid, distance or age axis with a multiplier, node ages, HPD/range bars from BEAST-style `{a,b}` metadata.
+- Rich labels with iTOL tags (`<b>`, `<i>`, `<sub>`, colors, fonts) and multi-style labels.
 
 **Colors**
 - Global background, branch and label colors, and font.
@@ -35,14 +45,17 @@ No server, no account, no uploads.
 
 **Editing** (all undoable)
 - Reroot on any branch, midpoint rooting, ladderize, rotate, collapse/expand, remove or extract clades, rename labels.
+- Auto-collapse by average leaf distance, support, LABELS class or name; bulk label editor with regex find and replace.
+- Hover shortcuts act on the node under the mouse (see Keyboard).
 
 **Analysis**
 - Multi-term search (contains, exact, regex) with a "not found" report for gene lists, then select, color, highlight or prune to the matches.
 - Select nodes to see root paths, their last common ancestor and a patristic distance matrix (copyable as TSV).
-- Hover for branch length, support, root distance, NHX attributes and dataset values.
+- Hover for branch length, support, root distance, NHX attributes, dataset values, or the node's POPUP_INFO card.
 
 **Output and sharing**
-- SVG and high-resolution PNG, Newick, and session JSON (tree, styles, datasets, settings).
+- SVG and high-resolution PNG (margin, scale, visible area only), Newick (optionally with display names), and session
+  JSON (tree, styles, datasets, settings).
 - Shareable links: the whole session is compressed into the link itself (after `#`), so it is never sent to a server.
 - The current session is autosaved in the browser.
 
@@ -102,6 +115,12 @@ SVG export uses the same scene description, so exports match the screen.
 | `+` / `-` | Zoom |
 | `/` | Search |
 | `Esc` | Clear selection |
+| `C` / `R` / `T` / `L` (mouse over a node) | Collapse, reroot, rotate, ladderize |
+| `N` / `S` / `B` (mouse over a node) | Rename, select, truncate branch |
+| `K` / `X` (mouse over a node) | Keep only this clade, remove it |
+
+Not reproduced from iTOL: QIIME2 `.qza` import, freehand drawing tools, dataset groups and user accounts/workspaces
+(sessions and share links replace accounts).
 
 ## Development
 

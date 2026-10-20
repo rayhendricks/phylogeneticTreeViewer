@@ -11,7 +11,8 @@ const PALETTE_KEY = 'localtree-palettes';
 const TYPE_NAMES = {
   colorstrip: 'strip', simplebar: 'bars', multibar: 'stacked', heatmap: 'heatmap', binary: 'binary', shapes: 'shapes',
   text: 'text', symbol: 'symbols', pie: 'pie', domains: 'domains', alignment: 'alignment', boxplot: 'box plot',
-  linechart: 'line chart', connection: 'connections', image: 'images',
+  linechart: 'line chart', connection: 'connections', image: 'images', range: 'ranges', arrows: 'arrows',
+  timescale: 'timescale', tanglegram: 'tanglegram',
 };
 
 const hex = c => { const p = parseColor(c); return p ? toHex(p) : '#888888'; };
@@ -110,6 +111,25 @@ export function initPanels(app) {
     return opts.map(([v, l]) => `<option value="${esc(v)}" ${v === s.branchColorBy ? 'selected' : ''}>${esc(l)}</option>`).join('');
   }
 
+  // Options for selects that pick a node metadata field: values (numbers) or ranges ("{a,b}" / "a-b").
+  function metaOptions(sel) {
+    const kind = sel.dataset.meta || 'width';
+    const s = state.settings, key = sel.dataset.setting;
+    const opts = kind === 'values' ? [['support', 'Support']] : [['none', kind === 'ranges' ? 'None' : 'Nothing (uniform)']];
+    if (kind === 'width' && state.tree) opts.push(['support', 'Support value'], ['length', 'Branch length']);
+    if (state.tree) {
+      const num = new Set(), rng = new Set();
+      for (const n of Tree.preorder(state.tree.root)) if (n.attrs) for (const [k, v] of Object.entries(n.attrs)) {
+        if (/^\s*[{[]?\s*-?[\d.eE+-]+\s*[,;]\s*-?[\d.eE+-]+\s*[}\]]?\s*$/.test(String(v))) rng.add(k);
+        else if (v !== '' && isFinite(parseFloat(v))) num.add(k);
+      }
+      if (kind === 'ranges') for (const k of [...rng].slice(0, 30)) opts.push([k, k]);
+      else for (const k of [...num].slice(0, 30)) opts.push(['attr:' + k, `Attribute: ${k}`]);
+    }
+    if (!opts.some(o => o[0] === s[key])) s[key] = opts[0][0];
+    return opts.map(([v, l]) => `<option value="${esc(v)}" ${v === s[key] ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  }
+
   function syncLight() {
     const s = state.settings;
     for (const o of $$('output[data-for]')) {
@@ -124,10 +144,12 @@ export function initPanels(app) {
     $('#branch-ramp').innerHTML = Object.keys(RAMPS).map(n => `<option ${n === s.branchRamp ? 'selected' : ''}>${n}</option>`).join('');
     $('#branch-ramp-row').hidden = s.branchColorBy === 'none' || s.branchColorBy.startsWith('cat:');
     $('#palette-select').innerHTML = paletteOptions(s.palette);
+    for (const sel of $$('.meta-select')) sel.innerHTML = metaOptions(sel);
     for (const inp of $$('[data-setting]')) {
       const k = inp.dataset.setting;
       if (inp.type === 'checkbox') inp.checked = !!s[k];
       else if (s[k] != null) inp.value = s[k];
+      else if (inp.type === 'number') inp.value = '';
     }
     const cs = getComputedStyle(document.documentElement);
     const defaults = { bgColor: '--canvas', branchColor: '--tree-branch', labelColor: '--tree-text' };

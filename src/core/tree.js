@@ -89,15 +89,54 @@ function lookupName(index, name) {
     index.byName.get(s.replace(/ /g, '_')) || null;
 }
 
-// Resolve an iTOL-style node id: a node name, or "A|B" meaning MRCA(A, B).
+// Resolve an iTOL-style node id: a node name, or "A|B" / "A---B" meaning MRCA(A, B).
 function resolveSpec(index, spec) {
   const s = String(spec).trim();
   if (!s) return null;
-  if (s.includes('|')) {
-    const found = s.split('|').map(p => lookupName(index, p)).filter(Boolean);
+  if (/^CONTAINS==/.test(s)) return resolveSpecs(index, s)[0] || null;
+  if (s.includes('|') || s.includes('---')) {
+    const found = s.split(/\||---/).map(p => lookupName(index, p)).filter(Boolean);
     return found.length ? mrca(found) : null;
   }
   return lookupName(index, s);
+}
+
+// Like resolveSpec, but "CONTAINS==text" matches every node whose name matches (as a regular expression).
+function resolveSpecs(index, spec) {
+  const s = String(spec).trim();
+  const m = /^CONTAINS==(.*)$/.exec(s);
+  if (!m) { const n = resolveSpec(index, s); return n ? [n] : []; }
+  let re;
+  try { re = new RegExp(m[1]); } catch (e) { re = { test: v => v.includes(m[1]) }; }
+  const out = [];
+  for (const n of index.byId.values()) if (n.name && re.test(n.name)) out.push(n);
+  return out;
+}
+
+// Collapse clades matching a rule; returns the number collapsed.
+// rule: { avgLength: x } | { support: '<70' } | { nodeClass: 'genus' } | { label: 'text' }
+function autoCollapse(root, rule) {
+  let count = 0;
+  const avgDist = n => { const base = rootDistance(n); const ls = leaves(n); return ls.reduce((a, l) => a + rootDistance(l) - base, 0) / ls.length; };
+  let test;
+  if (rule.avgLength != null) test = n => avgDist(n) < rule.avgLength;
+  else if (rule.support != null) {
+    const m = /^\s*([<>]?)\s*(-?[\d.]+)/.exec(String(rule.support));
+    if (!m) return 0;
+    const v = parseFloat(m[2]);
+    test = n => n.support != null && (m[1] === '>' ? n.support > v : n.support < v);
+  } else if (rule.nodeClass) test = n => n.style && n.style.nodeClass === rule.nodeClass;
+  else if (rule.label) test = n => (n.name && n.name.includes(rule.label)) || (n.style && n.style.displayName && n.style.displayName.includes(rule.label));
+  else return 0;
+  // Top-down: once a clade is collapsed its descendants are hidden anyway.
+  const stack = [root];
+  while (stack.length) {
+    const n = stack.pop();
+    if (!n.children.length) continue;
+    if (n.parent && test(n)) { if (!n.collapsed) { n.collapsed = true; count++; } continue; }
+    for (const c of n.children) stack.push(c);
+  }
+  return count;
 }
 
 // Re-root on the branch above `node`; frac is the fraction of that branch
@@ -327,7 +366,7 @@ function randomTree(nLeaves, seed = 42) {
 
 export {
   createNode, isLeaf, preorder, postorder, leaves, ancestors, branchLength, rootDistance,
-  mrca, patristic, hasBranchLengths, buildIndex, lookupName, resolveSpec, reroot, midpointRoot,
+  mrca, patristic, hasBranchLengths, buildIndex, lookupName, resolveSpec, resolveSpecs, autoCollapse, reroot, midpointRoot,
   ladderize, rotate, prune, removeClade, extractClade, collapseUnary, setStyle, setCladeStyle,
   snapshot, restore, stats, leafCounts, randomTree, mulberry32,
 };

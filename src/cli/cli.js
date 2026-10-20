@@ -11,6 +11,7 @@ import * as Tree from '../core/tree.js';
 import * as Newick from '../io/newick.js';
 import * as Ann from '../io/annotations.js';
 import { detectKind } from '../io/detect.js';
+import { treeFromJplace } from '../io/jplace.js';
 import { DEFAULTS, autoSettings } from '../core/settings.js';
 import { buildScene } from '../render/scene.js';
 import { sceneToSVG } from '../render/svg.js';
@@ -86,15 +87,14 @@ function tableDatasets(table, index, palette) {
 // Build a session object (the same format the browser app saves) from files on disk.
 export async function buildSession(opts) {
   const treeText = await readFile(opts.tree, 'utf8');
-  const trees = Newick.parseTrees(treeText);
-  const tree = { root: trees[0].root };
+  const tree = { root: detectKind(treeText, opts.tree) === 'jplace' ? treeFromJplace(treeText).root : Newick.parseTrees(treeText)[0].root };
   if (opts.midpoint && Tree.hasBranchLengths(tree.root)) Tree.midpointRoot(tree);
   if (opts.ladderize) Tree.ladderize(tree.root, true);
   const settings = autoSettings({ ...DEFAULTS }, tree.root);
   settings.mode = opts.layout || 'rectangular';
   if (opts.palette) settings.palette = opts.palette;
   const palette = PALETTES[settings.palette] || PALETTES['Tableau 10'];
-  const index = Tree.buildIndex(tree.root);
+  let index = Tree.buildIndex(tree.root);
   const datasets = [];
   const notes = [];
   const usedIds = new Set();
@@ -112,12 +112,22 @@ export async function buildSession(opts) {
       const p = Ann.parseItol(text);
       if (Ann.isTreeAnnotation(p.type)) {
         const r = Ann.applyTreeAnnotation(p, index);
+        if (r.multiStyle) settings.multiStyle = r.multiStyle;
+        if (r.prune && r.prune.size) {
+          if (!Tree.prune(tree, r.prune)) throw new Error(`${file}: PRUNE would remove every leaf`);
+          index = Tree.buildIndex(tree.root);
+        }
+        if (r.taxonomy) notes.push(`${basename(file)}: AUTO_TAXONOMY needs NCBI lookups and is applied only in the browser`);
         notes.push(`${basename(file)}: ${p.type}, ${r.applied} rows applied, ${r.missing.length} IDs not found`);
       } else {
         const ds = Ann.datasetFromItol(p);
         addDs(ds);
         notes.push(`${basename(file)}: ${ds.type} "${ds.label}", ${ds.rows.filter(r => Tree.resolveSpec(index, r.id)).length}/${ds.rows.length} IDs matched`);
       }
+    } else if (kind === 'meme') {
+      const ds = Ann.datasetFromMeme(text, basename(file).replace(/\.[^.]+$/, ''));
+      addDs(ds);
+      notes.push(`${basename(file)}: MEME motifs, ${ds.rows.filter(r => Tree.resolveSpec(index, r.id)).length}/${ds.rows.length} sequences matched`);
     } else if (kind === 'fasta') {
       const ds = Ann.datasetFromFasta(text, basename(file).replace(/\.[^.]+$/, ''));
       addDs(ds);
