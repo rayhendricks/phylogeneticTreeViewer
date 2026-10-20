@@ -4,12 +4,17 @@ import * as Tree from '../core/tree.js';
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// NCBI allows 3 requests/s without an API key. Its rate-limit replies carry no CORS header, so in a
+// browser they surface as a network TypeError rather than a 429; retry both with backoff.
 async function get(url, signal) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url, { signal });
-    if (res.ok) return res;
-    if (res.status !== 429) throw new Error(`NCBI request failed (${res.status})`);
-    await sleep(1000 * (attempt + 1));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let res;
+    try { res = await fetch(url, { signal }); } catch (e) {
+      if (e.name === 'AbortError' || attempt === 3) throw e.name === 'AbortError' ? e : new Error('Could not reach NCBI (rate limit or network); try again in a minute');
+    }
+    if (res && res.ok) return res;
+    if (res && res.status !== 429) throw new Error(`NCBI request failed (${res.status})`);
+    await sleep(1500 * 2 ** attempt);
   }
   throw new Error('NCBI rate limit reached; try again in a minute');
 }
@@ -38,14 +43,14 @@ export async function fetchTaxa(queries, { onProgress = () => {}, signal } = {})
     const res = await get(`${EUTILS}esearch.fcgi?db=taxonomy&retmode=json&retmax=500&term=${encodeURIComponent(term)}`, signal);
     const json = await res.json();
     for (const id of (json.esearchresult && json.esearchresult.idlist) || []) ids.add(id);
-    await sleep(350);
+    await sleep(400);
   }
   const all = [...ids], taxa = [];
   for (let i = 0; i < all.length; i += 150) {
     onProgress(`Fetching lineages ${i + 1}–${Math.min(all.length, i + 150)} of ${all.length}…`);
     const res = await get(`${EUTILS}efetch.fcgi?db=taxonomy&retmode=xml&id=${all.slice(i, i + 150).join(',')}`, signal);
     taxa.push(...parseTaxaXml(await res.text()));
-    await sleep(350);
+    await sleep(400);
   }
   const found = new Set(taxa.flatMap(t => [t.id, t.name.toLowerCase()]));
   const missing = queries.map(s => s.trim()).filter(Boolean).filter(q => !found.has(/^\d+$/.test(q) ? q : q.replace(/_/g, ' ').toLowerCase()));
