@@ -1128,12 +1128,15 @@ function bind() {
   });
 
   document.addEventListener('keydown', e => {
-    const typing = e.target.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]');
+    // Text fields keep their own undo; checkboxes, sliders and selects still allow app undo after a click.
+    const textEntry = e.target.closest('textarea, [contenteditable], input:not([type=checkbox]):not([type=range]):not([type=radio]):not([type=color]):not([type=button])') || document.querySelector('dialog[open]');
+    const typing = textEntry || e.target.closest('select');
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); el.fileInput.click(); return; }
-    if (typing) return;
+    if (textEntry) return;
     if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+    if (typing) return;
     if (mod || e.altKey) return;
     const modes = { 1: 'rectangular', 2: 'circular', 3: 'slanted', 4: 'unrooted' };
     if (hoverNode && HOVER_KEYS[e.key] && state.index.byId.get(hoverNode.id) === hoverNode) {

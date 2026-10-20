@@ -525,7 +525,7 @@ function datasetFromMeme(text, label = 'MEME motifs') {
     rows.push({ id: seq.name, length: seq.length || Math.max(0, ...domains.map(d => d.end)), domains });
   }
   if (!rows.length) throw new Error('No motif sites found in MEME XML');
-  return { id: newId(), type: 'domains', label, visible: true, color: '#4e79a7', width: 220, legend: null,
+  return { id: newId(), type: 'domains', label, visible: true, color: '#4e79a7', width: 220, legend: null, autoColor: true,
     opts: { backbone: '#aaaaaa', backboneHeight: 2, showLabels: true }, rows };
 }
 
@@ -551,6 +551,7 @@ const FALSE = /^(0|no|n|false|f|-|absent)$/i;
 
 // Build datasets from table columns. cols: [{index, type}].
 // Types: colorstrip, gradient, simplebar, heatmap, multibar, binary, text, rename.
+// Datasets built here are marked autoColor so a later change of the global palette recolors them.
 function datasetsFromTable(table, idCol, cols, palette) {
   const pc = i => paletteColor(i, palette);
   const out = [];
@@ -601,7 +602,7 @@ function datasetsFromTable(table, idCol, cols, palette) {
       fields: groups.binary.map((i, k) => ({ label: name(i), color: pc(k), shape: 2 })),
       rows: rows.map(r => ({ id: r[idCol], values: groups.binary.map(i => TRUE.test(r[i]) ? 1 : FALSE.test(r[i]) ? 0 : -1) })) });
   }
-  return { datasets: out, rename: rename == null ? null : rows.map(r => [r[idCol], r[rename]]) };
+  return { datasets: out.map(d => ({ ...d, autoColor: true })), rename: rename == null ? null : rows.map(r => [r[idCol], r[rename]]) };
 }
 
 export {
